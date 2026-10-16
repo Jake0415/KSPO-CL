@@ -1,0 +1,388 @@
+/* ============================================================================
+ * kspo-ingest Design System — Foundation Tokens
+ * ----------------------------------------------------------------------------
+ * 모든 시각 토큰의 단일 출처. 컴포넌트 토큰(tokens.css)은 이 값을 참조합니다.
+ * 직접 수정할 때는 동일 의미의 컴포넌트 토큰까지 함께 검토하세요.
+ * ========================================================================= */
+
+:root {
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 1. COLOR — Primitive Scales (50 → 950)
+   * 모든 컬러는 11단계 스케일로 정의. UI 토큰은 이 스케일을 참조해서 만듭니다.
+   * ───────────────────────────────────────────────────────────────────────*/
+
+  /* Slate — 베이스 중성 (텍스트, 보더, 배경) */
+  --slate-50:  #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CAD5E2;
+  --slate-400: #94A3B8;
+  --slate-500: #62748E;
+  --slate-600: #475569;
+  --slate-700: #314158;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  --slate-950: #020618;
+
+  /* Blue — Primary brand (#155DFC = blue-600) */
+  --blue-50:  #EFF4FF;
+  --blue-100: #DBE7FE;
+  --blue-200: #BEDBFF;
+  --blue-300: #8EC5FF;
+  --blue-400: #51A2FF;
+  --blue-500: #2B7FFF;
+  --blue-600: #155DFC;
+  --blue-700: #1352E0;
+  --blue-800: #193CB8;
+  --blue-900: #1C398E;
+  --blue-950: #162456;
+
+  /* Green — Success */
+  --green-50:  #F0FDF4;
+  --green-100: #DCFCE7;
+  --green-200: #B9F8CF;
+  --green-300: #7BF1A8;
+  --green-400: #05DF72;
+  --green-500: #00C950;
+  --green-600: #16A34A;
+  --green-700: #008236;
+  --green-800: #016630;
+  --green-900: #0D542B;
+  --green-950: #032E15;
+
+  /* Amber — Warning */
+  --amber-50:  #FFFBEB;
+  --amber-100: #FEF3C6;
+  --amber-200: #FEE685;
+  --amber-300: #FFD230;
+  --amber-400: #FFB200;
+  --amber-500: #F59E0B;
+  --amber-600: #D97706;
+  --amber-700: #BB4D00;
+  --amber-800: #973C00;
+  --amber-900: #7B3306;
+  --amber-950: #461901;
+
+  /* Red — Danger */
+  --red-50:  #FEF2F2;
+  --red-100: #FFE2E2;
+  --red-200: #FFC9C9;
+  --red-300: #FFA1A1;
+  --red-400: #FF6467;
+  --red-500: #FB2C36;
+  --red-600: #E7000B;
+  --red-700: #C10007;
+  --red-800: #9F0712;
+  --red-900: #82181A;
+  --red-950: #460809;
+
+  /* Sky — Info */
+  --sky-50:  #F0F9FF;
+  --sky-100: #DFF2FE;
+  --sky-200: #B8E6FE;
+  --sky-300: #74D4FF;
+  --sky-400: #00BCFF;
+  --sky-500: #00A6F4;
+  --sky-600: #0284C7;
+  --sky-700: #0069A8;
+  --sky-800: #00598C;
+  --sky-900: #024A70;
+  --sky-950: #052F4A;
+
+  /* Violet — Accent (코드/셀렉터, 데이터 시리즈) */
+  --violet-50:  #F5F3FF;
+  --violet-100: #EDE9FE;
+  --violet-200: #DDD6FF;
+  --violet-300: #C3B5FD;
+  --violet-400: #A684FF;
+  --violet-500: #8E51FF;
+  --violet-600: #7F22FE;
+  --violet-700: #7008E7;
+  --violet-800: #5D0EC0;
+  --violet-900: #4D179A;
+  --violet-950: #2F0D68;
+
+  /* Pink — Accent 2 */
+  --pink-50:  #FDF2F8;
+  --pink-100: #FCE7F3;
+  --pink-200: #FBCFE8;
+  --pink-300: #FDA5D5;
+  --pink-400: #FB64B6;
+  --pink-500: #F6339A;
+  --pink-600: #E60076;
+  --pink-700: #C6005C;
+  --pink-800: #A3004C;
+  --pink-900: #861043;
+  --pink-950: #510424;
+
+  /* Teal — 데이터 시리즈 5번째 */
+  --teal-50:  #F0FDFA;
+  --teal-100: #CBFBF1;
+  --teal-200: #96F7E4;
+  --teal-300: #46ECD5;
+  --teal-400: #00D5BE;
+  --teal-500: #00BBA7;
+  --teal-600: #009689;
+  --teal-700: #00786F;
+  --teal-800: #005F5A;
+  --teal-900: #0B4F4A;
+  --teal-950: #022F2E;
+
+  /* Pure */
+  --white: #FFFFFF;
+  --black: #000000;
+  --transparent: transparent;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 2. SPACING — 4px grid base
+   * ───────────────────────────────────────────────────────────────────────*/
+  --space-0:   0;
+  --space-px:  1px;
+  --space-0_5: 2px;
+  --space-1:   4px;
+  --space-1_5: 6px;
+  --space-2:   8px;
+  --space-2_5: 10px;
+  --space-3:   12px;
+  --space-3_5: 14px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-7:   28px;
+  --space-8:   32px;
+  --space-9:   36px;
+  --space-10:  40px;
+  --space-11:  44px;
+  --space-12:  48px;
+  --space-14:  56px;
+  --space-16:  64px;
+  --space-20:  80px;
+  --space-24:  96px;
+  --space-28:  112px;
+  --space-32:  128px;
+  --space-40:  160px;
+  --space-48:  192px;
+  --space-56:  224px;
+  --space-64:  256px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 3. SIZING — Component widths/heights
+   * ───────────────────────────────────────────────────────────────────────*/
+  --size-control-xs: 24px;
+  --size-control-sm: 28px;
+  --size-control-md: 32px;
+  --size-control-lg: 36px;
+  --size-control-xl: 40px;
+
+  --size-touch-target: 44px;     /* WCAG 권장 */
+
+  --size-icon-xs: 12px;
+  --size-icon-sm: 14px;
+  --size-icon:    16px;
+  --size-icon-md: 18px;
+  --size-icon-lg: 20px;
+  --size-icon-xl: 24px;
+  --size-icon-2xl: 32px;
+
+  --size-avatar-xs: 20px;
+  --size-avatar-sm: 24px;
+  --size-avatar:    32px;
+  --size-avatar-md: 40px;
+  --size-avatar-lg: 48px;
+  --size-avatar-xl: 64px;
+  --size-avatar-2xl: 96px;
+
+  --size-sidebar-expanded:  248px;
+  --size-sidebar-collapsed: 68px;
+  --size-topbar:            56px;
+
+  --size-page-max:  1280px;
+  --size-form-max:  600px;
+  --size-prose-max: 720px;
+
+  --size-modal-sm: 480px;
+  --size-modal:    640px;
+  --size-modal-lg: 880px;
+  --size-modal-xl: 1120px;
+
+  --size-drawer-sm: 360px;
+  --size-drawer:    480px;
+  --size-drawer-lg: 640px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 4. RADIUS
+   * ───────────────────────────────────────────────────────────────────────*/
+  --radius-none: 0;
+  --radius-xs:   3px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius:      8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-2xl:  20px;
+  --radius-3xl:  24px;
+  --radius-full: 9999px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 5. BORDER WIDTH
+   * ───────────────────────────────────────────────────────────────────────*/
+  --border-0:  0;
+  --border-1:  1px;
+  --border-2:  2px;
+  --border-4:  4px;
+  --border-8:  8px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 6. SHADOW (Elevation)
+   * ───────────────────────────────────────────────────────────────────────*/
+  --shadow-none:  none;
+  --shadow-xs:    0 1px 2px 0 rgba(2, 6, 24, 0.04);
+  --shadow-sm:    0 1px 2px 0 rgba(2, 6, 24, 0.05), 0 1px 1px -1px rgba(2, 6, 24, 0.03);
+  --shadow-md:    0 4px 6px -1px rgba(2, 6, 24, 0.06), 0 2px 4px -2px rgba(2, 6, 24, 0.04);
+  --shadow-lg:    0 10px 15px -3px rgba(2, 6, 24, 0.08), 0 4px 6px -4px rgba(2, 6, 24, 0.04);
+  --shadow-xl:    0 20px 25px -5px rgba(2, 6, 24, 0.10), 0 8px 10px -6px rgba(2, 6, 24, 0.04);
+  --shadow-2xl:   0 25px 50px -12px rgba(2, 6, 24, 0.18);
+  --shadow-inner: inset 0 2px 4px 0 rgba(2, 6, 24, 0.04);
+
+  /* Focus ring */
+  --shadow-focus:        0 0 0 3px rgba(21, 93, 252, 0.20);
+  --shadow-focus-danger: 0 0 0 3px rgba(231, 0, 11, 0.20);
+  --shadow-focus-success: 0 0 0 3px rgba(22, 163, 74, 0.20);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 7. TYPOGRAPHY
+   * ───────────────────────────────────────────────────────────────────────*/
+
+  /* Font families */
+  --font-sans:    'Pretendard', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:    'Geist Mono', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+
+  /* Font weights */
+  --font-thin:        100;
+  --font-extralight:  200;
+  --font-light:       300;
+  --font-regular:     400;
+  --font-medium:      500;
+  --font-semibold:    600;
+  --font-bold:        700;
+  --font-extrabold:   800;
+  --font-black:       900;
+
+  /* Font sizes */
+  --text-2xs:  10px;
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;       /* default body */
+  --text-lg:   15px;
+  --text-xl:   16px;
+  --text-2xl:  18px;
+  --text-3xl:  20px;
+  --text-4xl:  24px;
+  --text-5xl:  30px;
+  --text-6xl:  36px;
+  --text-7xl:  48px;
+  --text-8xl:  60px;
+  --text-9xl:  72px;
+
+  /* Line heights */
+  --leading-none:    1;
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+  --leading-loose:   1.85;
+
+  /* Letter spacing */
+  --tracking-tighter: -0.04em;
+  --tracking-tight:   -0.02em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.02em;
+  --tracking-wider:   0.04em;
+  --tracking-widest:  0.08em;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 8. MOTION
+   * ───────────────────────────────────────────────────────────────────────*/
+  --duration-instant: 0ms;
+  --duration-fast:    100ms;
+  --duration-quick:   120ms;
+  --duration-base:    160ms;
+  --duration-moderate: 200ms;
+  --duration-slow:    240ms;
+  --duration-slower:  320ms;
+  --duration-slowest: 480ms;
+
+  --ease-linear:   linear;
+  --ease-in:       cubic-bezier(0.4, 0, 1, 1);
+  --ease-out:      cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 9. Z-INDEX
+   * ───────────────────────────────────────────────────────────────────────*/
+  --z-base:        0;
+  --z-raised:      10;
+  --z-dropdown:    100;
+  --z-sticky:      200;
+  --z-fixed:       300;
+  --z-overlay:     400;
+  --z-modal:       500;
+  --z-popover:     600;
+  --z-tooltip:     700;
+  --z-toast:       800;
+  --z-debug:       9999;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 10. BREAKPOINTS (informational; CSS uses media queries directly)
+   * ───────────────────────────────────────────────────────────────────────*/
+  --bp-sm:  640px;
+  --bp-md:  768px;
+  --bp-lg:  1024px;
+  --bp-xl:  1280px;
+  --bp-2xl: 1536px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 11. OPACITY
+   * ───────────────────────────────────────────────────────────────────────*/
+  --opacity-0:   0;
+  --opacity-5:   0.05;
+  --opacity-10:  0.10;
+  --opacity-20:  0.20;
+  --opacity-30:  0.30;
+  --opacity-40:  0.40;
+  --opacity-50:  0.50;
+  --opacity-60:  0.60;
+  --opacity-70:  0.70;
+  --opacity-80:  0.80;
+  --opacity-90:  0.90;
+  --opacity-disabled: 0.40;
+  --opacity-hover:    0.08;     /* hover overlay alpha */
+  --opacity-pressed:  0.12;
+  --opacity-focus:    0.20;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 12. BLUR & EFFECTS
+   * ───────────────────────────────────────────────────────────────────────*/
+  --blur-sm:  4px;
+  --blur:     8px;
+  --blur-md:  12px;
+  --blur-lg:  16px;
+  --blur-xl:  24px;
+  --blur-2xl: 40px;
+
+  --backdrop-blur:        12px;
+  --backdrop-saturate:    160%;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * 13. ASPECT RATIOS
+   * ───────────────────────────────────────────────────────────────────────*/
+  --aspect-square:    1 / 1;
+  --aspect-video:     16 / 9;
+  --aspect-portrait:  3 / 4;
+  --aspect-wide:      21 / 9;
+  --aspect-golden:    1.618 / 1;
+}

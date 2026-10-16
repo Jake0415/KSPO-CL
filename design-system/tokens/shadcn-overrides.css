@@ -1,0 +1,50 @@
+/* shadcn/ui 변수 매핑 — kspo-ingest 디자인 시스템
+ *
+ * shadcn/ui 컴포넌트가 사용하는 CSS 변수를 우리 디자인 토큰으로 교체합니다.
+ * 프로젝트 globals.css 에 import 하세요.
+ */
+
+@import "./tokens.css";
+
+:root {
+  /* shadcn/ui 표준 변수 */
+  --background: 0 0% 100%;
+  --foreground: 222 47% 5%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 5%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 5%;
+
+  --primary: 219 97% 53%;            /* #155DFC */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96%;          /* #F1F5F9 */
+  --secondary-foreground: 222 47% 5%;
+
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;   /* #62748E */
+
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 5%;
+
+  --destructive: 357 100% 45%;       /* #E7000B */
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 213 27% 90%;             /* #E2E8F0 */
+  --input: 213 27% 90%;
+  --ring: 219 97% 53%;
+
+  --radius: 0.5rem;                   /* 8px */
+}
+
+.dark {
+  /* 다크 테마 — DESIGN_SYSTEM.md §10 기준 (확장 시 수정) */
+  --background: 222 47% 11%;
+  --foreground: 210 40% 96%;
+  --card: 222 47% 17%;
+  --card-foreground: 210 40% 96%;
+  --primary: 219 97% 60%;
+  --border: 215 28% 25%;
+}

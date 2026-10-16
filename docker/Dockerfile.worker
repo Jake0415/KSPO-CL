@@ -1,0 +1,28 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Seoul
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libxml2 libxslt1.1 curl tzdata && \
+    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml README.md /app/
+COPY src /app/src
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
+RUN pip install -U pip && pip install -e .[api]
+
+# Playwright chromium(headless shell) + 시스템 의존성 — JS-SPA 사이트 렌더링용.
+# 미설치 시 SmartFetcher가 HTTP로 폴백하지만 진짜 SPA는 빈 shell만 받는다.
+RUN playwright install --with-deps chromium
+
+COPY configs /app/configs
+
+CMD ["arq","kspo_ingest.tasks.worker.WorkerSettings"]

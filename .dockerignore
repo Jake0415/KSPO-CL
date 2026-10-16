@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+LOCAL_ACCESS.txt
+__pycache__
+.pytest_cache
+.ruff_cache
+web/node_modules
+web/.next
+storage
+data

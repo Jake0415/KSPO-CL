@@ -1,0 +1,61 @@
+{
+  "_comment": "Curated canonical entity contact-facts for the /api/qa known-facts layer. Each value is grounded in a real corpus page (source). The answerer injects a matching fact only when the query shows contact/location/hours intent AND an entity alias matches — so non-contact queries are unaffected. Extend by adding entities; keep every value backed by a crawled source URL.",
+  "entities": [
+    {
+      "entity": "국민체육진흥공단",
+      "aliases": ["국민체육진흥공단", "체육진흥공단", "공단", "kspo", "케이스포", "kspo 본사"],
+      "fields": {
+        "address": {
+          "value": "서울특별시 송파구 올림픽로 424 (방이동, 올림픽회관), 우편번호 05540",
+          "source": "https://www.kspo.or.kr/news/bbs/B0000089/view.do?menuNo=1200004&nttId=61166"
+        },
+        "phone": {
+          "value": "대표전화 02-410-1114",
+          "source": "https://www.ksponco.or.kr/sports/map"
+        }
+      }
+    },
+    {
+      "entity": "소마미술관",
+      "aliases": ["소마미술관", "소마 미술관", "soma", "올림픽조각공원 미술관"],
+      "fields": {
+        "address": {
+          "value": "서울특별시 송파구 올림픽로 424 (우편번호 05540)",
+          "source": "https://soma.kspo.or.kr/ucms/contents/600027"
+        },
+        "phone": {
+          "value": "02-410-1077",
+          "source": "https://soma.kspo.or.kr/ucms/contents/600027"
+        },
+        "hours": {
+          "value": "관람시간 10:00~18:00 (월요일 휴관)",
+          "source": "https://soma.kspo.or.kr/ucms/contents/600023"
+        }
+      }
+    },
+    {
+      "entity": "국민체력100",
+      "aliases": ["국민체력100", "국민체력 100", "체력100", "체력측정", "체력 측정"],
+      "fields": {
+        "fee": {
+          "value": "무료 (국민체력100 체력측정·운동처방·상담은 전 국민 무료)",
+          "source": "https://www.kspo.or.kr/news/bbs/B0000089/view.do?menuNo=1200004&nttId=61166"
+        },
+        "reservation": {
+          "value": "체력측정 예약은 국민체력100 홈페이지(nfa.kspo.or.kr)에서 로그인 후 신청합니다. 예약 오픈은 매월 1일·16일 오후 1시이며, 매일 오전 9시에는 전날 취소된 잔여 예약 신청이 가능합니다(잔여 예약은 센터별 확인).",
+          "source": "https://nfa.kspo.or.kr/beforeReserve.kspo"
+        }
+      }
+    },
+    {
+      "entity": "국립스포츠박물관",
+      "aliases": ["국립스포츠박물관", "스포츠박물관", "sports museum"],
+      "fields": {
+        "phone": {
+          "value": "02-410-1828 (유물 기증담당)",
+          "source": "https://sportsmuseum.kspo.or.kr"
+        }
+      }
+    }
+  ]
+}

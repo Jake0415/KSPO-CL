@@ -1,0 +1,13 @@
+{
+  "host": "www.kspo.or.kr",
+  "scheme": "https",
+  "display_name": "KSPO PoC",
+  "max_depth": 0,
+  "max_pages": 1,
+  "rate_limit_rps": "1.0",
+  "concurrency": 1,
+  "use_playwright": false,
+  "respect_robots": true,
+  "incremental_enabled": false,
+  "is_active": true
+}

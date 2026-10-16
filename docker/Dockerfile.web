@@ -1,0 +1,41 @@
+# Next.js 16 (App Router) standalone build — Node 서버로 실행.
+# nginx는 별도 컨테이너로 분리되어 reverse proxy 역할만 한다 (docker-compose 참조).
+#
+# design-system이 web/tailwind.config.js의 require 대상이므로 빌드 컨텍스트에
+# 함께 포함시킨다 (compose context: ..로 프로젝트 루트 전달).
+
+FROM node:20-alpine AS deps
+WORKDIR /workspace
+COPY web/package.json web/package-lock.json* /workspace/web/
+WORKDIR /workspace/web
+RUN npm ci || npm install
+
+FROM node:20-alpine AS build
+WORKDIR /workspace
+COPY --from=deps /workspace/web/node_modules /workspace/web/node_modules
+COPY web/ /workspace/web/
+COPY design-system/ /workspace/design-system/
+WORKDIR /workspace/web
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3300
+ENV HOSTNAME=0.0.0.0
+ENV TZ=Asia/Seoul
+RUN apk add --no-cache tzdata && cp /usr/share/zoneinfo/$TZ /etc/localtime
+
+# Next.js standalone output — outputFileTracingRoot가 monorepo 루트이므로
+# `.next/standalone/web/`가 실제 진입점. .next/static과 public은 web 서브트리에 배치.
+COPY --from=build /workspace/web/.next/standalone /app
+COPY --from=build /workspace/web/.next/static /app/web/.next/static
+# public/이 없을 수 있으므로 build 스테이지에서 빈 디렉토리 보장
+RUN mkdir -p /app/web/public
+COPY --from=build /workspace/web/publi[c] /app/web/public/
+
+WORKDIR /app/web
+EXPOSE 3300
+CMD ["node", "server.js"]

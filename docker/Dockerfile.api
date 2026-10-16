@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Seoul
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libxml2 libxslt1.1 curl tzdata && \
+    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml README.md /app/
+COPY src /app/src
+COPY configs /app/configs
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
+RUN pip install -U pip && pip install -e .[api]
+
+EXPOSE 8080
+CMD ["uvicorn","kspo_ingest.api.main:app","--host","0.0.0.0","--port","8080"]

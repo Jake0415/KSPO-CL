@@ -1,0 +1,14 @@
+/* design-system tokens — 3단 카스케이드 (foundation → semantic → component)
+ * tailwind.config.js 의 var(--color-*) 매핑은 semantic.css 가 있어야 해석된다. */
+@import '../../design-system/tokens/foundation.css';
+@import '../../design-system/tokens/semantic.css';
+@import '../../design-system/tokens/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* tabular numbers for data columns */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

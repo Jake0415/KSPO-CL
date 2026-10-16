@@ -1,0 +1,2 @@
+a7e305bb2cfc74e50dbb07eb1458a72a7fa73c23
+Clean tracked source from D:/project/Sonar/kspo-ingest; local-only changes documented in LOCAL_SETUP.md.

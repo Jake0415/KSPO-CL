@@ -1,0 +1,369 @@
+/* ============================================================================
+ * kspo-ingest Design System — Semantic Tokens
+ * ----------------------------------------------------------------------------
+ * 의미 기반 토큰. foundation.css 의 primitive 값을 참조합니다.
+ * UI 컴포넌트는 항상 이 토큰을 사용해야 합니다 (primitive 직접 사용 금지).
+ *
+ * 사용 예:
+ *   color: var(--color-text);
+ *   background: var(--color-surface);
+ *   border-color: var(--color-border);
+ *
+ * .dark 클래스가 붙으면 자동으로 다크 테마 매핑이 적용됩니다.
+ * ========================================================================= */
+
+@import "./foundation.css";
+
+:root {
+  /* ─────────────────────────────────────────────────────────────────────────
+   * BACKGROUND
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-bg:           var(--slate-50);          /* 페이지 배경 */
+  --color-bg-muted:     var(--slate-100);         /* 입력 비활성, 호버 영역 */
+  --color-bg-subtle:    var(--slate-200);         /* 더 어두운 보조 배경 */
+  --color-bg-inverse:   var(--slate-950);         /* 다크 영역 (toast, code) */
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * SURFACE — 카드, 모달, 패널
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-surface:           var(--white);
+  --color-surface-raised:    var(--white);        /* 카드 위 카드 */
+  --color-surface-overlay:   var(--white);        /* modal, popover */
+  --color-surface-sunken:    var(--slate-50);     /* 함몰 영역 */
+  --color-surface-hover:     var(--slate-50);
+  --color-surface-pressed:   var(--slate-100);
+  --color-surface-selected:  var(--blue-50);
+  --color-surface-disabled:  var(--slate-100);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * BORDER
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-border:        var(--slate-200);        /* 기본 보더 */
+  --color-border-strong: var(--slate-300);        /* 강조 보더 */
+  --color-border-soft:   #EDF1F6;                 /* 카드 내부 구분선 */
+  --color-border-hover:  var(--slate-400);
+  --color-border-focus:  var(--blue-600);
+  --color-border-error:  var(--red-600);
+  --color-border-success: var(--green-600);
+  --color-border-inverse: var(--slate-700);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * TEXT (Foreground)
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-text:           var(--slate-950);       /* 본문, 제목 */
+  --color-text-muted:     var(--slate-500);       /* 라벨, 메타 */
+  --color-text-subtle:    var(--slate-400);       /* placeholder, hint */
+  --color-text-disabled:  var(--slate-400);
+  --color-text-inverse:   var(--white);           /* 다크 배경 위 */
+  --color-text-link:      var(--blue-600);
+  --color-text-link-hover: var(--blue-700);
+  --color-text-on-primary: var(--white);
+  --color-text-on-success: var(--white);
+  --color-text-on-warning: var(--white);
+  --color-text-on-danger:  var(--white);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * PRIMARY (Brand)
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-primary:           var(--blue-600);
+  --color-primary-hover:     var(--blue-700);
+  --color-primary-pressed:   var(--blue-800);
+  --color-primary-soft:      var(--blue-50);
+  --color-primary-soft-hover: var(--blue-100);
+  --color-primary-strong:    var(--blue-800);
+  --color-primary-fg:        var(--white);
+  --color-primary-fg-soft:   var(--blue-700);     /* primary-soft 위 텍스트 */
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * SUCCESS / WARNING / DANGER / INFO
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-success:           var(--green-600);
+  --color-success-hover:     var(--green-700);
+  --color-success-soft:      var(--green-100);
+  --color-success-soft-hover: var(--green-200);
+  --color-success-strong:    var(--green-800);
+  --color-success-fg:        var(--white);
+  --color-success-fg-soft:   var(--green-800);
+
+  --color-warning:           var(--amber-600);
+  --color-warning-hover:     var(--amber-700);
+  --color-warning-soft:      var(--amber-100);
+  --color-warning-soft-hover: var(--amber-200);
+  --color-warning-strong:    var(--amber-800);
+  --color-warning-fg:        var(--white);
+  --color-warning-fg-soft:   var(--amber-800);
+
+  --color-danger:            var(--red-600);
+  --color-danger-hover:      var(--red-700);
+  --color-danger-soft:       var(--red-50);
+  --color-danger-soft-hover: var(--red-100);
+  --color-danger-strong:     var(--red-800);
+  --color-danger-fg:         var(--white);
+  --color-danger-fg-soft:    var(--red-800);
+
+  --color-info:              var(--sky-600);
+  --color-info-hover:        var(--sky-700);
+  --color-info-soft:         var(--sky-100);
+  --color-info-soft-hover:   var(--sky-200);
+  --color-info-strong:       var(--sky-800);
+  --color-info-fg:           var(--white);
+  --color-info-fg-soft:      var(--sky-800);
+
+  /* Accent (코드, 셀렉터 강조) */
+  --color-accent:            var(--violet-600);
+  --color-accent-soft:       var(--violet-100);
+  --color-accent-fg:         var(--white);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * DATA VISUALIZATION — 차트 시리즈 컬러 (10개)
+   * 시각적 구별을 위해 hue를 충분히 분리. 1번부터 순서대로 사용.
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-data-1:  var(--blue-600);
+  --color-data-2:  var(--green-600);
+  --color-data-3:  var(--amber-500);
+  --color-data-4:  var(--violet-600);
+  --color-data-5:  var(--teal-600);
+  --color-data-6:  var(--pink-600);
+  --color-data-7:  var(--sky-500);
+  --color-data-8:  var(--red-500);
+  --color-data-9:  var(--slate-700);
+  --color-data-10: var(--blue-300);
+
+  /* Heatmap scale — 5단계 */
+  --color-heat-1: var(--red-600);     /* 매우 나쁨 */
+  --color-heat-2: var(--amber-500);
+  --color-heat-3: var(--amber-300);
+  --color-heat-4: var(--green-300);
+  --color-heat-5: var(--green-600);   /* 매우 좋음 */
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * INTERACTION
+   * ───────────────────────────────────────────────────────────────────────*/
+  --color-focus-ring:         var(--blue-600);
+  --color-focus-ring-shadow:  rgba(21, 93, 252, 0.20);
+  --color-overlay:            rgba(2, 6, 24, 0.50);     /* modal backdrop */
+  --color-overlay-soft:       rgba(2, 6, 24, 0.30);
+  --color-overlay-blur:       rgba(255, 255, 255, 0.78); /* glass panel */
+  --color-scrim:              rgba(0, 0, 0, 0.60);
+
+  /* Hover/pressed overlays (currentColor 기반) */
+  --overlay-hover:    rgba(2, 6, 24, 0.04);
+  --overlay-pressed:  rgba(2, 6, 24, 0.08);
+  --overlay-selected: rgba(21, 93, 252, 0.10);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * COMPONENT-LEVEL ALIASES (자주 쓰이는 조합 단축)
+   * ───────────────────────────────────────────────────────────────────────*/
+
+  /* Button heights */
+  --button-height-xs: var(--size-control-xs);
+  --button-height-sm: var(--size-control-sm);
+  --button-height:    var(--size-control-lg);
+  --button-height-lg: var(--size-control-xl);
+  --button-padding-x:    var(--space-3_5);
+  --button-padding-x-sm: var(--space-3);
+  --button-padding-x-xs: var(--space-2_5);
+  --button-radius:    var(--radius);
+  --button-radius-sm: var(--radius-md);
+  --button-gap:       var(--space-1_5);
+  --button-font-weight: var(--font-medium);
+
+  /* Input */
+  --input-height:     var(--size-control-lg);
+  --input-height-sm: var(--size-control-md);
+  --input-padding-x: var(--space-3);
+  --input-radius:    var(--radius);
+  --input-bg:        var(--color-surface);
+  --input-bg-disabled: var(--color-bg-muted);
+  --input-border:    var(--color-border);
+  --input-border-hover: var(--color-border-strong);
+  --input-border-focus: var(--color-border-focus);
+  --input-border-error: var(--color-border-error);
+  --input-text:      var(--color-text);
+  --input-placeholder: var(--color-text-subtle);
+
+  /* Card */
+  --card-bg:           var(--color-surface);
+  --card-border:       var(--color-border);
+  --card-radius:       var(--radius-lg);
+  --card-padding:      var(--space-5);
+  --card-padding-sm:   var(--space-4);
+  --card-padding-lg:   var(--space-6);
+  --card-header-padding-y: 18px;
+  --card-header-padding-x: var(--space-5);
+  --card-shadow:       var(--shadow-none);
+  --card-shadow-hover: var(--shadow-sm);
+
+  /* Badge */
+  --badge-height:    20px;
+  --badge-height-sm: 16px;
+  --badge-padding-x: var(--space-2);
+  --badge-radius:    var(--radius-full);
+  --badge-font-size: var(--text-sm);
+  --badge-font-weight: var(--font-medium);
+
+  /* Table */
+  --table-header-bg:       var(--color-bg-muted);
+  --table-header-text:     var(--color-text-muted);
+  --table-header-font-size: var(--text-sm);
+  --table-header-font-weight: var(--font-medium);
+  --table-row-bg:          var(--color-surface);
+  --table-row-bg-hover:    var(--color-bg);
+  --table-row-bg-selected: var(--color-primary-soft);
+  --table-row-border:      var(--color-border-soft);
+  --table-cell-padding-x:  var(--space-4);
+  --table-cell-padding-y:  var(--space-3_5);
+  --table-cell-padding-y-compact: var(--space-2_5);
+
+  /* Modal */
+  --modal-bg:       var(--color-surface);
+  --modal-radius:   var(--radius-lg);
+  --modal-shadow:   var(--shadow-2xl);
+  --modal-padding:  var(--space-6);
+  --modal-overlay:  var(--color-overlay);
+
+  /* Toast */
+  --toast-bg:       var(--color-bg-inverse);
+  --toast-text:     var(--color-text-inverse);
+  --toast-radius:   var(--radius);
+  --toast-padding-x: var(--space-4);
+  --toast-padding-y: var(--space-2_5);
+  --toast-shadow:   var(--shadow-lg);
+  --toast-duration: 2400ms;
+
+  /* Tooltip */
+  --tooltip-bg:       var(--color-bg-inverse);
+  --tooltip-text:     var(--color-text-inverse);
+  --tooltip-radius:   var(--radius-md);
+  --tooltip-padding-x: var(--space-2);
+  --tooltip-padding-y: var(--space-1);
+  --tooltip-font-size: var(--text-sm);
+  --tooltip-shadow:   var(--shadow-md);
+  --tooltip-delay:    600ms;
+
+  /* Sidebar */
+  --sidebar-bg:           var(--color-surface);
+  --sidebar-border:       var(--color-border);
+  --sidebar-item-height:  36px;
+  --sidebar-item-radius:  var(--radius);
+  --sidebar-item-padding-x: var(--space-3);
+  --sidebar-item-text:    var(--color-text);
+  --sidebar-item-text-muted: var(--color-text-muted);
+  --sidebar-item-active-bg: var(--color-primary-soft);
+  --sidebar-item-active-text: var(--color-primary);
+  --sidebar-item-hover-bg: var(--color-bg-muted);
+
+  /* Topbar */
+  --topbar-bg:        var(--color-surface);
+  --topbar-border:    var(--color-border);
+  --topbar-height:    var(--size-topbar);
+  --topbar-padding-x: var(--space-6);
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * MOTION ALIASES
+   * ───────────────────────────────────────────────────────────────────────*/
+  --motion-hover:        var(--duration-quick) var(--ease-out);
+  --motion-press:        var(--duration-fast) var(--ease-out);
+  --motion-expand:       var(--duration-moderate) var(--ease-in-out);
+  --motion-modal-enter:  var(--duration-base) var(--ease-out);
+  --motion-modal-exit:   var(--duration-fast) var(--ease-in);
+  --motion-page:         var(--duration-slow) var(--ease-in-out);
+}
+
+/* ===========================================================================
+ * DARK THEME — .dark 클래스 또는 [data-theme="dark"]
+ * ========================================================================= */
+.dark,
+[data-theme="dark"] {
+  --color-bg:        var(--slate-950);
+  --color-bg-muted:  var(--slate-900);
+  --color-bg-subtle: var(--slate-800);
+  --color-bg-inverse: var(--slate-50);
+
+  --color-surface:          var(--slate-900);
+  --color-surface-raised:   var(--slate-800);
+  --color-surface-overlay:  var(--slate-800);
+  --color-surface-sunken:   var(--slate-950);
+  --color-surface-hover:    var(--slate-800);
+  --color-surface-pressed:  var(--slate-700);
+  --color-surface-selected: rgba(21, 93, 252, 0.15);
+  --color-surface-disabled: var(--slate-800);
+
+  --color-border:        var(--slate-700);
+  --color-border-strong: var(--slate-600);
+  --color-border-soft:   var(--slate-800);
+  --color-border-hover:  var(--slate-500);
+  --color-border-inverse: var(--slate-200);
+
+  --color-text:          var(--slate-50);
+  --color-text-muted:    var(--slate-400);
+  --color-text-subtle:   var(--slate-500);
+  --color-text-disabled: var(--slate-600);
+  --color-text-inverse:  var(--slate-950);
+  --color-text-link:     var(--blue-400);
+  --color-text-link-hover: var(--blue-300);
+
+  --color-primary:        var(--blue-500);
+  --color-primary-hover:  var(--blue-400);
+  --color-primary-pressed: var(--blue-300);
+  --color-primary-soft:   rgba(21, 93, 252, 0.15);
+  --color-primary-soft-hover: rgba(21, 93, 252, 0.22);
+  --color-primary-fg-soft: var(--blue-300);
+
+  --color-success-soft:  rgba(22, 163, 74, 0.15);
+  --color-success-fg-soft: var(--green-300);
+  --color-warning-soft:  rgba(217, 119, 6, 0.15);
+  --color-warning-fg-soft: var(--amber-300);
+  --color-danger-soft:   rgba(231, 0, 11, 0.15);
+  --color-danger-fg-soft: var(--red-300);
+  --color-info-soft:     rgba(2, 132, 199, 0.15);
+  --color-info-fg-soft:  var(--sky-300);
+
+  --color-overlay:       rgba(0, 0, 0, 0.70);
+  --color-overlay-blur:  rgba(15, 23, 42, 0.78);
+  --overlay-hover:       rgba(255, 255, 255, 0.06);
+  --overlay-pressed:     rgba(255, 255, 255, 0.10);
+
+  --shadow-xs:    0 1px 2px 0 rgba(0, 0, 0, 0.30);
+  --shadow-sm:    0 1px 2px 0 rgba(0, 0, 0, 0.40), 0 1px 1px -1px rgba(0, 0, 0, 0.30);
+  --shadow-md:    0 4px 6px -1px rgba(0, 0, 0, 0.40), 0 2px 4px -2px rgba(0, 0, 0, 0.30);
+  --shadow-lg:    0 10px 15px -3px rgba(0, 0, 0, 0.50), 0 4px 6px -4px rgba(0, 0, 0, 0.30);
+  --shadow-xl:    0 20px 25px -5px rgba(0, 0, 0, 0.55), 0 8px 10px -6px rgba(0, 0, 0, 0.30);
+  --shadow-2xl:   0 25px 50px -12px rgba(0, 0, 0, 0.70);
+
+  color-scheme: dark;
+}
+
+/* ===========================================================================
+ * SYSTEM PREFERENCE — auto dark mode (옵션)
+ * ========================================================================= */
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --color-bg:        var(--slate-950);
+    --color-surface:   var(--slate-900);
+    --color-text:      var(--slate-50);
+    --color-text-muted: var(--slate-400);
+    --color-border:    var(--slate-700);
+    color-scheme: dark;
+  }
+}
+
+/* ===========================================================================
+ * MOTION PREFERENCE
+ * ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast:    0ms;
+    --duration-quick:   0ms;
+    --duration-base:    0ms;
+    --duration-moderate: 0ms;
+    --duration-slow:    0ms;
+    --duration-slower:  0ms;
+    --duration-slowest: 0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,115 @@
+# Global selector blacklist (`docs/design/02_pipeline.md` §2.10 미러).
+# 도메인별 추가는 domains.selector_blacklist 컬럼으로 누적.
+#
+# 2026-07-05 데이터 신뢰성 테스트 결과 반영:
+# - 퀵메뉴/패밀리사이트/팝업/배너 잔여 해소
+# - spoinfo 푸터(저작권/개인정보/찾아오시는길) 제거 강화
+# - kspo/ksponco/parktel 퀵메뉴 제거
+
+# --- 구조 태그 ---
+- header
+- nav
+- footer
+- aside
+- .skip
+
+# --- 네비게이션 ---
+- .gnb
+- .lnb
+- .snb
+- .breadcrumb
+- .location
+- .topMenu
+- .top-menu
+- .sub-menu
+- .subMenu
+# 전체메뉴/올메뉴 (PARKTEL .allMenu)
+- .allMenu
+- .all-menu
+- .all_menu
+- '[class*="allMenu"]'
+- '[class*="all-menu"]'
+# 유틸 메뉴 (SPOINFO .util — 검색/메뉴열기)
+- .util
+- .util-menu
+- .utilMenu
+- '[class*="utilMenu"]'
+- '[class*="util-menu"]'
+# 모바일 메뉴/햄버거
+- .hamburger
+- .hamburger-menu
+- .mobile-menu
+- .mobileMenu
+- .mobile_display
+- '[class*="mobileMenu"]'
+- '[class*="m-menu"]'
+# 스킵 네비게이션 (PARKTEL #skipToContent)
+- '#skipToContent'
+- '#skip-content'
+
+# --- 퀵메뉴 (KSPO/KSPONCO/PARKTEL 공통) ---
+- .quickmenu
+- .quick-menu
+- .quick_menu
+- '[id*="quick"]'
+- '[class*="quickMenu"]'
+- '[class*="quick-menu"]'
+
+# --- 패밀리사이트 드롭다운 (SPOINFO/PARKTEL/KSPO 공통) ---
+- .family-site
+- .familySite
+- .family_site
+- '[class*="familySite"]'
+- '[class*="family-site"]'
+
+# --- 팝업/배너 ---
+- '[id*="popup"]'
+- '[class*="popup"]'
+- '[class*="banner"]'
+- .popupArea
+- .popup-area
+- .bannerArea
+- .banner-area
+
+# --- 공유/SNS/인쇄 ---
+- .share
+- .sns
+- .print
+
+# --- 하단 관련/인기/저작권 ---
+- .related
+- .popular
+- .copyright
+- .copy
+- .policy
+- .sitemap
+- .privacy
+# 푸터 유틸 (SPOINFO 개인정보/저작권/전화번호/위치)
+- '[class*="footer-util"]'
+- '[class*="footerUtil"]'
+- '[class*="foot_info"]'
+- '[class*="footer_info"]'
+- '[class*="footer-info"]'
+- .foot_area
+- .footArea
+- .foot-area
+- .btm_area
+- .btm-area
+
+# --- 검색/페이징 (게시판) ---
+- .bbs-search
+- .bbs-paging
+- .paging
+
+# --- ID 기반 ---
+- '#hd'
+- '#ft'
+- '#header'
+- '#footer'
+- '#footerArea'
+- '#bottomArea'
+
+# --- 비표시 콘텐츠 ---
+- script
+- style
+- noscript

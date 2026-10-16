@@ -1,0 +1,113 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kspo-ingest"
+version = "0.2.0"
+description = "KSPO web crawling → Qdrant vector ingestion (Lite, simplified MVP)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "무한아이티" }]
+
+dependencies = [
+  # Web / API (Admin UI는 React SPA — Jinja2/HTMX 미사용. FastAPI는 API만 제공)
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "itsdangerous>=2.2", # Starlette SessionMiddleware
+  "python-multipart>=0.0.9", # 로그인 form (application/x-www-form-urlencoded)
+  # Auth
+  # bcrypt 4.x를 직접 사용 (passlib 1.7.4는 bcrypt 4.x 호환성 버그로 사용 불가).
+  "bcrypt>=4.0",
+  # Database
+  "sqlalchemy>=2.0",
+  "asyncpg>=0.29",
+  "psycopg2-binary>=2.9", # Alembic용 동기 드라이버 (런타임은 asyncpg 사용)
+  "alembic>=1.13",
+  # Queue
+  "arq>=0.26",
+  "redis>=5.0",
+  # HTTP / crawl
+  "httpx[http2]>=0.27",
+  "tenacity>=9.0",
+  "selectolax>=0.3,<1",
+  "lxml>=5.2",
+  "trafilatura>=1.10",
+  "readability-lxml>=0.8",
+  "tldextract>=5.1",
+  "robotexclusionrulesparser>=1.7",
+  # Encoding
+  "charset-normalizer>=3.3",
+  # LLM / Vector DB
+  "openai>=1.40",
+  "tiktoken>=0.7",
+  "qdrant-client>=1.10",
+  # Attachment text extraction
+  "pypdf>=5.0",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
+  "python-pptx>=1.0",
+  # Observability
+  "loguru>=0.7",
+  "aiosmtplib>=3.0", # alert email — KSPO 사내 SMTP
+  # Misc
+  "pydantic>=2.7",
+  "pydantic-settings>=2.4",
+  "orjson>=3.10",
+  "pyyaml>=6.0",
+  "playwright>=1.61.0",
+  # CLI
+  "typer>=0.12",
+  # Metrics (optional — noop fallback if missing)
+  # "prometheus-client>=0.20",
+]
+
+# Lite 버전에서 제거된 의존성 (Tier 2/3로 이동):
+# - simhash (청크 dedup)
+# - prometheus-client (메트릭 exporter)
+# - langdetect (한국어 비율 측정으로 대체)
+# - pyjwt (JWT 미사용)
+#
+# 디자인 시스템 적용으로 제거 (2026-05-07):
+# - jinja2 (Admin UI를 React SPA로 일원화 — design-system/ 참조)
+
+[project.scripts]
+kspo-ingest = "kspo_ingest.platform.cli:main"
+
+[project.optional-dependencies]
+api = []
+test = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.24",
+  "respx>=0.21",
+  "freezegun>=1.5",
+  "pytest-postgresql>=6.0",
+  "fakeredis>=2.23",
+]
+dev = [
+  "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kspo_ingest"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "ASYNC"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q -m 'not qdrant_integration and not e2e'"
+markers = [
+  "qdrant_integration: 자체 Qdrant 컨테이너가 필요한 통합 테스트 (기본 실행에서 제외 — `pytest -m qdrant_integration`로 실행)",
+  "e2e: docker-compose.test.yml stack 필요 (기본 실행에서 제외 — `pytest -m e2e tests/e2e/`로 실행)",
+]
