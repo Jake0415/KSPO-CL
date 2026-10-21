@@ -104,7 +104,11 @@ async def push_to_sonar(
 
     # upsert만으로는 mongo에 status:-1로 방치됨. tiledesk-server의 scrape/single
     # 트리거를 명시 호출해야 워커 큐에 실려 임베딩·Qdrant 색인이 실제 진행된다.
-    # 실패해도 INDEXED 전이는 유지 — 다음 push나 수동 backfill로 재트리거 가능.
+    # Registration/trigger failures remain retryable; never count them as INDEXED.
+    if not kb_id:
+        async with session_factory() as s:
+            await bump_stats(s, job_id, errors=1)
+        return 0
     if kb_id:
         try:
             # 재색인 멱등성: 재스크랩 전 이 kb_id의 기존 Qdrant point를 제거해
@@ -120,6 +124,9 @@ async def push_to_sonar(
                 kb_id=kb_id,
                 err=str(exc)[:300],
             ).warning("scrape/single trigger failed — 문서는 mongo에 저장됐으나 색인 미완")
+            async with session_factory() as s:
+                await bump_stats(s, job_id, errors=1)
+            return 0
 
     async with session_factory() as s:
         page = await s.get(Page, page_id)

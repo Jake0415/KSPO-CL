@@ -8,10 +8,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from selectolax.parser import HTMLParser
 
-from kspo_ingest.crawl.loop_guard import CURSORS
+from kspo_ingest.crawl.board_identity import ARTICLE_IDS as SHARED_ARTICLE_IDS
+from kspo_ingest.crawl.board_identity import BOARD_IDS, CURSORS, query_pairs
 from kspo_ingest.crawl.url_normalize import TRACKING_PARAMS, normalize_url
 
-ARTICLE_IDS = {"nttid", "conseq", "con_seq", "articleid", "article_id", "seq", "idx"}
+ARTICLE_IDS = SHARED_ARTICLE_IDS | {"seq", "idx"}
 NOISE = CURSORS | {"searchwrd", "searchcnd", "searchkey", "keyword", "sch", "searchword"}
 DETAIL = re.compile(r"(?:/(?:view|detail|read)(?:[/.]|$)|boardview|/\d+/?$)", re.I)
 EXCLUDED = (
@@ -61,7 +62,7 @@ def entry_url(url: str, host: str) -> str | None:
     ):
         return None
     if any(
-        k.lower() in {"mode", "action"}
+        k.lower() in {"mode", "action", "act"}
         and v.lower() in {"view", "detail", "read", "delete", "insert", "update", "save"}
         for k, v in parse_qsl(p.query)
     ):
@@ -80,10 +81,14 @@ def entry_url(url: str, host: str) -> str | None:
     elif DETAIL.search(path) or any(k.lower() in ARTICLE_IDS for k, _ in parse_qsl(p.query)):
         return None
     path = re.sub(r"/page/\d+/?$", "", path, flags=re.I)
+    pairs = query_pairs(p.query)
+    navigation = {"topmenuseq", "menuno"} if any(
+        k.lower() in BOARD_IDS and v for k, v in pairs
+    ) else set()
     qs = sorted(
         (k, v)
-        for k, v in parse_qsl(p.query, keep_blank_values=True)
-        if k.lower() not in NOISE | ARTICLE_IDS and k not in TRACKING_PARAMS
+        for k, v in pairs
+        if k.lower() not in NOISE | ARTICLE_IDS | navigation and k not in TRACKING_PARAMS
     )
     return urlunsplit((p.scheme.lower(), p.netloc.lower(), path, urlencode(qs), ""))
 

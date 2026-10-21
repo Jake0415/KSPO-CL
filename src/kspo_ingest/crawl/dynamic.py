@@ -245,8 +245,10 @@ async def expand_readonly(
     page,
     *,
     max_actions: int = 100,
+    max_elapsed_seconds: float = 30.0,
     navigation_cache: dict[str, set[str]] | None = None,
-    capture_initial: bool = True,
+    capture_initial: bool = False,
+    initial_responses: list | None = None,
     readiness_policy: ReadinessPolicy | None = None,
 ) -> tuple[str, dict]:
     host = urlsplit(page.url).hostname
@@ -321,153 +323,170 @@ async def expand_readonly(
     tried: set[str] = set()
     visited_states = {snapshot_content(initial)}
     try:
-        if capture_initial:
-            # Listener is now attached: capture AJAX fired on initial page load too.
-            await page.reload(wait_until="domcontentloaded", timeout=15000)
-            report["initial_readiness"] = await waiter.wait(initial=True)
-            initial = await page.content()
-        for _ in range(max_actions):
-            current = await page.content()
-            candidates = interaction_candidates(current)
-            report["candidate_count"] = max(report["candidate_count"], len(candidates))
-            eligible = [c for c in candidates if c["label"] + ":" + c["index"] not in tried]
-            if not eligible:
-                break
-            candidate = eligible[0]
-            key = candidate["label"] + ":" + candidate["index"]
-            nav_key = candidate.get("navigation_key")
-            cache_key = f"{urljoin(original_url, chr(46))}:{nav_key}"
-            if nav_key and navigation_cache is not None and cache_key in navigation_cache:
-                revealed_links.update(navigation_cache[cache_key])
-                tried.add(key)
-                report["navigation_cache_hits"] = report.get("navigation_cache_hits", 0) + 1
-                continue
-            control = page.locator(_SELECTOR).nth(int(candidate["index"]))
-            try:
-                if not await control.is_visible():
-                    report["hidden"].append(str(candidate["label"]))
+        async with asyncio.timeout(max_elapsed_seconds):
+            # Initial AJAX was observed before navigation, so do not reload the page.
+            for response in (initial_responses or [])[:200]:
+                tasks.append(asyncio.create_task(capture(response)))
+            if capture_initial:
+                # Listener is now attached: capture AJAX fired on initial page load too.
+                await page.reload(wait_until="domcontentloaded", timeout=15000)
+                report["initial_readiness"] = await waiter.wait(initial=True)
+                initial = await page.content()
+            for _ in range(max_actions):
+                try:
+                    current = await page.content()
+                except Exception as exc:
+                    report["failures"].append("content:" + type(exc).__name__)
+                    report["stop_reason"] = "navigation_in_progress"
+                    break
+                candidates = interaction_candidates(current)
+                report["candidate_count"] = max(report["candidate_count"], len(candidates))
+                eligible = [c for c in candidates if c["label"] + ":" + c["index"] not in tried]
+                if not eligible:
+                    break
+                candidate = eligible[0]
+                key = candidate["label"] + ":" + candidate["index"]
+                nav_key = candidate.get("navigation_key")
+                cache_key = f"{urljoin(original_url, chr(46))}:{nav_key}"
+                if nav_key and navigation_cache is not None and cache_key in navigation_cache:
+                    revealed_links.update(navigation_cache[cache_key])
                     tried.add(key)
+                    report["navigation_cache_hits"] = report.get("navigation_cache_hits", 0) + 1
                     continue
-                # is_visible() ignores overlays and offscreen/closed menu panels.
-                # Avoid spending the click timeout on controls that cannot receive input.
-                await control.scroll_into_view_if_needed(timeout=1500)
-                hit = await control.evaluate("""el => {
-                    const r = el.getBoundingClientRect();
-                    const left = Math.max(0, r.left), right = Math.min(innerWidth, r.right);
-                    const topY = Math.max(0, r.top), bottom = Math.min(innerHeight, r.bottom);
-                    const x = left + (right - left) / 2, y = topY + (bottom - topY) / 2;
-                    const top = document.elementFromPoint(x, y);
-                    return {clickable: !!top && (top === el || el.contains(top)),
-                            blocker: top ? top.tagName.toLowerCase() : "outside_viewport"};
-                }""")
-                if not hit["clickable"]:
-                    report.setdefault("obstructed_controls", []).append(
-                        {"action": str(candidate["label"]), "blocker": hit["blocker"]}
-                    )
-                    tried.add(key)
-                    continue
-                before = snapshot_content(current)
-                before_document = await waiter.snapshot()
-                if candidate.get("option") is not None:
-                    await control.select_option(str(candidate["option"]), timeout=2500)
-                else:
-                    await control.click(timeout=2500, no_wait_after=True)
-                report["clicked"] += 1
-                ready = await waiter.wait(initial=False, before=before_document)
-                report.setdefault("readiness", []).append(ready)
-                if page.url != original_url:
-                    if urlsplit(page.url).hostname == host and not _WRITE.search(
-                        urlsplit(page.url).path
-                    ):
-                        revealed_links.add(page.url)
-                        if nav_key and navigation_cache is not None:
-                            navigation_cache[cache_key] = {page.url}
-                    await page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
-                    await waiter.wait(initial=True)
-                    tried.add(key)
-                    report.setdefault("navigations", []).append(str(candidate["label"]))
-                    continue
-                revealed_html = await page.content()
-                for anchor in HTMLParser(revealed_html).css("a[href]"):
-                    target = urljoin(original_url, anchor.attributes.get("href", ""))
-                    if (
-                        urlsplit(target).hostname == host
-                        and not _WRITE.search(urlsplit(target).path)
-                        and urlsplit(target).scheme in ("http", "https")
-                    ):
-                        revealed_links.add(target)
-                if nav_key and navigation_cache is not None:
-
-                    def body_without_navigation(markup):
-                        tree = HTMLParser(markup)
-                        for node in tree.css("nav,header,footer,#gnb,#topNav,#header"):
-                            node.decompose()
-                        return tree.text(separator=" ", strip=True)
-
-                    if candidate.get("navigation_menu") or body_without_navigation(
-                        current
-                    ) == body_without_navigation(revealed_html):
-                        navigation_tree = HTMLParser(revealed_html)
-                        navigation_cache[cache_key] = {
-                            urljoin(original_url, a.attributes.get("href") or "")
-                            for a in navigation_tree.css(
-                                "nav a[href],header a[href],#gnb a[href],"
-                                "#topNav a[href],#header a[href]"
-                            )
-                            if urlsplit(
-                                urljoin(original_url, a.attributes.get("href") or "")
-                            ).scheme
-                            in ("http", "https")
-                            and urlsplit(
-                                urljoin(original_url, a.attributes.get("href") or "")
-                            ).hostname
-                            == host
-                        }
-                content = snapshot_content(revealed_html)
-                if content != before:
-                    if content in visited_states:
+                control = page.locator(_SELECTOR).nth(int(candidate["index"]))
+                try:
+                    if not await control.is_visible():
+                        report["hidden"].append(str(candidate["label"]))
                         tried.add(key)
-                        report["repeated_states"] = report.get("repeated_states", 0) + 1
                         continue
-                    visited_states.add(content)
-                    if content not in observed:
-                        observations.append(content)
-                        observed.add(content)
-                    if not candidate["repeat"]:
+                    # is_visible() ignores overlays and offscreen/closed menu panels.
+                    # Avoid spending the click timeout on controls that cannot receive input.
+                    await control.scroll_into_view_if_needed(timeout=1500)
+                    hit = await control.evaluate("""el => {
+                        const r = el.getBoundingClientRect();
+                        const left = Math.max(0, r.left), right = Math.min(innerWidth, r.right);
+                        const topY = Math.max(0, r.top), bottom = Math.min(innerHeight, r.bottom);
+                        const x = left + (right - left) / 2, y = topY + (bottom - topY) / 2;
+                        const top = document.elementFromPoint(x, y);
+                        return {clickable: !!top && (top === el || el.contains(top)),
+                                blocker: top ? top.tagName.toLowerCase() : "outside_viewport"};
+                    }""")
+                    if not hit["clickable"]:
+                        report.setdefault("obstructed_controls", []).append(
+                            {"action": str(candidate["label"]), "blocker": hit["blocker"]}
+                        )
                         tried.add(key)
-                else:
-                    report["no_change"] += 1
-                    tried.add(key)
-            except Exception as exc:
-                if isinstance(exc, ContentReadinessError):
-                    report.setdefault("readiness_failures", []).append(
-                        {
-                            "action": str(candidate["label"]),
-                            "error": str(exc)[:300],
-                        }
-                    )
-                report["failures"].append(str(candidate["label"]) + ":" + type(exc).__name__)
-                tried.add(key)
-                # A failed navigation can leave Chromium on chrome-error://. Restore
-                # before inspecting another control; retain the valid initial HTML.
-                if page.url != original_url:
-                    try:
+                        continue
+                    before = snapshot_content(current)
+                    before_document = await waiter.snapshot()
+                    if candidate.get("option") is not None:
+                        await control.select_option(str(candidate["option"]), timeout=2500)
+                    else:
+                        await control.click(timeout=2500, no_wait_after=True)
+                    report["clicked"] += 1
+                    ready = await waiter.wait(initial=False, before=before_document)
+                    report.setdefault("readiness", []).append(ready)
+                    if page.url != original_url:
+                        if urlsplit(page.url).hostname == host and not _WRITE.search(
+                            urlsplit(page.url).path
+                        ):
+                            revealed_links.add(page.url)
+                            if nav_key and navigation_cache is not None:
+                                navigation_cache[cache_key] = {page.url}
                         await page.goto(original_url, wait_until="domcontentloaded", timeout=15000)
                         await waiter.wait(initial=True)
-                        report["recovered_navigations"] = report.get("recovered_navigations", 0) + 1
-                    except Exception as recovery_exc:
-                        report["failures"].append("restore:" + type(recovery_exc).__name__)
-                        report["stop_reason"] = "restore_failed"
-                        break
-        else:
-            report["limit_reached"] = True
+                        tried.add(key)
+                        report.setdefault("navigations", []).append(str(candidate["label"]))
+                        continue
+                    revealed_html = await page.content()
+                    for anchor in HTMLParser(revealed_html).css("a[href]"):
+                        target = urljoin(original_url, (anchor.attributes.get("href") or ""))
+                        if (
+                            urlsplit(target).hostname == host
+                            and not _WRITE.search(urlsplit(target).path)
+                            and urlsplit(target).scheme in ("http", "https")
+                        ):
+                            revealed_links.add(target)
+                    if nav_key and navigation_cache is not None:
+
+                        def body_without_navigation(markup):
+                            tree = HTMLParser(markup)
+                            for node in tree.css("nav,header,footer,#gnb,#topNav,#header"):
+                                node.decompose()
+                            return tree.text(separator=" ", strip=True)
+
+                        if candidate.get("navigation_menu") or body_without_navigation(
+                            current
+                        ) == body_without_navigation(revealed_html):
+                            navigation_tree = HTMLParser(revealed_html)
+                            navigation_cache[cache_key] = {
+                                urljoin(original_url, a.attributes.get("href") or "")
+                                for a in navigation_tree.css(
+                                    "nav a[href],header a[href],#gnb a[href],"
+                                    "#topNav a[href],#header a[href]"
+                                )
+                                if urlsplit(
+                                    urljoin(original_url, a.attributes.get("href") or "")
+                                ).scheme
+                                in ("http", "https")
+                                and urlsplit(
+                                    urljoin(original_url, a.attributes.get("href") or "")
+                                ).hostname
+                                == host
+                            }
+                    content = snapshot_content(revealed_html)
+                    if content != before:
+                        if content in visited_states:
+                            tried.add(key)
+                            report["repeated_states"] = report.get("repeated_states", 0) + 1
+                            continue
+                        visited_states.add(content)
+                        if content not in observed:
+                            observations.append(content)
+                            observed.add(content)
+                        if not candidate["repeat"]:
+                            tried.add(key)
+                    else:
+                        report["no_change"] += 1
+                        tried.add(key)
+                except Exception as exc:
+                    if isinstance(exc, ContentReadinessError):
+                        report.setdefault("readiness_failures", []).append(
+                            {
+                                "action": str(candidate["label"]),
+                                "error": str(exc)[:300],
+                            }
+                        )
+                    report["failures"].append(str(candidate["label"]) + ":" + type(exc).__name__)
+                    tried.add(key)
+                    # A failed navigation can leave Chromium on chrome-error://. Restore
+                    # before inspecting another control; retain the valid initial HTML.
+                    if page.url != original_url:
+                        try:
+                            await page.goto(
+                                original_url, wait_until="domcontentloaded", timeout=15000
+                            )
+                            await waiter.wait(initial=True)
+                            report["recovered_navigations"] = (
+                                report.get("recovered_navigations", 0) + 1
+                            )
+                        except Exception as recovery_exc:
+                            report["failures"].append("restore:" + type(recovery_exc).__name__)
+                            report["stop_reason"] = "restore_failed"
+                            break
+            else:
+                report["limit_reached"] = True
+    except TimeoutError:
+        # Preserve initial DOM and every block already captured; report incomplete expansion.
+        report["stop_reason"] = "dynamic_time_limit"
+        report["limit_reached"] = True
     finally:
         waiter.close()
         page.remove_listener("response", on_response)
         await page.unroute("**/*", guard)
         if tasks:
             try:
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=2)
             except TimeoutError:
                 report["failures"].append("ajax_timeout")
     report["needs_review"] = bool(

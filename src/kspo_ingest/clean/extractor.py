@@ -20,7 +20,7 @@ _NOISE_TAGS = ("script", "style", "noscript", "template")
 
 
 def _strip_noise_tags(html: str) -> str:
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     tree.strip_tags(list(_NOISE_TAGS))
     return tree.html or html
 
@@ -71,7 +71,7 @@ def _dedup_lines(text: str) -> str:
 
 
 def _extract_title(html: str) -> str | None:
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     title_tag = tree.css_first("title")
     if title_tag and title_tag.text(strip=True):
         return title_tag.text(strip=True)
@@ -82,7 +82,7 @@ def _extract_title(html: str) -> str | None:
 
 
 def _try_main_article(html: str) -> str:
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     for sel in ("main", "article", "[role='main']"):
         node = tree.css_first(sel)
         if node:
@@ -101,7 +101,7 @@ def _has_data_table(html: str) -> bool:
     레이아웃용 표를 오검출할 수 있으나, 그 경우에도 trafilatura 결과가
     MIN_BODY_LEN_FOR_ACCEPT를 넘지 못하면 기존 main_article 경로로 되돌아간다.
     """
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     return any(tbl.css_first("td") is not None for tbl in tree.css("table"))
 
 
@@ -133,7 +133,7 @@ def _try_readability(html: str) -> str:
 
 def _try_density(html: str) -> str:
     """텍스트 밀도 휴리스틱 — body 전체 텍스트 추출."""
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     if tree.body is None:
         return ""
     text = tree.body.text(separator="\n")

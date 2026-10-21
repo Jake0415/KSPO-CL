@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kspo_ingest.attach.discovery import discover_attachments
+from kspo_ingest.attach.discovery import discover_attachments, is_attachment_url, is_binary_content
 from kspo_ingest.clean.date_extract import extract_posted_at
 from kspo_ingest.clean.extractor import ExtractionResult, extract
 from kspo_ingest.clean.hash import normalize_for_hash
@@ -71,6 +71,10 @@ async def clean_page(ctx: dict, *, job_id: int, page_id: int, force: bool = Fals
             return None
 
         raw_bytes = raw_path.read_bytes()
+        if is_attachment_url(page.url) or is_binary_content(raw_bytes, page.content_type):
+            await mark_dropped(s, page_id, reason="attachment_metadata_only")
+            await bump_stats(s, job_id, dropped=1, drop_reasons__attachment_metadata_only=1)
+            return None
         result = extract(
             raw_bytes,
             content_type=page.content_type,
@@ -128,7 +132,12 @@ async def clean_page(ctx: dict, *, job_id: int, page_id: int, force: bool = Fals
         # Incremental skip — content_hash 미변경 시 LLM·임베딩 비용 0으로 즉시 종료.
         # last_fetched_at만 갱신하고 status는 보존(INDEXED/REFINED 등 그대로).
         # refresh-url(M4.T4.2) force=True면 비교를 건너뛰어 무조건 refine 진입.
-        if not force and page.content_hash and page.content_hash == new_hash:
+        if (
+            not force
+            and page.content_hash
+            and page.content_hash == new_hash
+            and not (page.storage_paths or {}).get("processing_pending")
+        ):
             page.last_fetched_at = datetime.now(UTC)
             await s.commit()
             await bump_stats(s, job_id, skipped=1)
@@ -148,6 +157,7 @@ async def clean_page(ctx: dict, *, job_id: int, page_id: int, force: bool = Fals
         if page_posted_at is not None:
             page.posted_at = page_posted_at
         page.content_hash = new_hash
+        page.storage_paths = {**(page.storage_paths or {}), "processing_pending": True}
         page.status = "CLEANED"
         await s.commit()
 

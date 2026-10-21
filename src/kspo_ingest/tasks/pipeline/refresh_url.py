@@ -14,6 +14,12 @@ from kspo_ingest.quality.scorer import ScorerInput, score_document
 from kspo_ingest.tasks.jobs import bump_stats, finish_job, is_cancelled, job_guard, start_job
 from kspo_ingest.tasks.pipeline.clean_page import clean_page
 from kspo_ingest.tasks.pipeline.fetch_page import fetch_page
+from kspo_ingest.tasks.pipeline.parallel import (
+    PublicationError,
+    drain_processing,
+    processing_scope,
+    submit_postprocessing,
+)
 from kspo_ingest.tasks.pipeline.push_to_sonar import push_to_sonar
 from kspo_ingest.tasks.pipeline.refine_page import refine_page
 
@@ -23,7 +29,11 @@ log = get_logger("worker", "refresh_url")
 async def refresh_url(ctx: dict, *, job_id: int, page_id: int, force: bool = False) -> None:
     # Any failure must still leave a terminal job status (no ghost RUNNING).
     async with job_guard(ctx["session_factory"], job_id):
-        await _refresh_url_impl(ctx, job_id=job_id, page_id=page_id, force=force)
+        async with ctx["session_factory"]() as session:
+            page = await session.get(Page, page_id)
+            domain_id = getattr(page, "domain_id", None)
+        async with processing_scope(ctx, job_id, domain_id) as run_ctx:
+            await _refresh_url_impl(run_ctx, job_id=job_id, page_id=page_id, force=force)
 
 
 async def _refresh_url_impl(ctx: dict, *, job_id: int, page_id: int, force: bool = False) -> None:
@@ -63,6 +73,28 @@ async def _refresh_url_impl(ctx: dict, *, job_id: int, page_id: int, force: bool
         log.bind(event="refresh_skip_unchanged", page_id=fetched_id).info("unchanged")
         return
 
+    await submit_postprocessing(
+        ctx,
+        job_id,
+        fetched_id,
+        lambda: _finish_page(
+            ctx, job_id=job_id, domain_id=domain_id, fetched_id=fetched_id, url=url, cleaned=cleaned
+        ),
+    )
+    await drain_processing(ctx)
+
+    async with session_factory() as s:
+        await bump_stats(s, job_id, discovered=1)
+        await _finish_refresh(s, job_id)
+    log.bind(event="refresh_done", job_id=job_id, page_id=fetched_id, force=force).info(
+        "refresh done"
+    )
+
+
+async def _finish_page(
+    ctx: dict, *, job_id: int, domain_id: int, fetched_id: int, url: str, cleaned: dict
+):
+    session_factory = ctx["session_factory"]
     refined = await refine_page(
         ctx,
         job_id=job_id,
@@ -99,7 +131,7 @@ async def _refresh_url_impl(ctx: dict, *, job_id: int, page_id: int, force: bool
 
         targets = resolve_embedding_targets(score, url=url)
         if targets:
-            await push_to_sonar(
+            sent = await push_to_sonar(
                 ctx,
                 job_id=job_id,
                 page_id=fetched_id,
@@ -107,13 +139,10 @@ async def _refresh_url_impl(ctx: dict, *, job_id: int, page_id: int, force: bool
                 summary=r.get("summary"),
                 keywords=r.get("keywords") or [],
             )
-
-    async with session_factory() as s:
-        await bump_stats(s, job_id, discovered=1)
-        await _finish_refresh(s, job_id)
-    log.bind(event="refresh_done", job_id=job_id, page_id=fetched_id, force=force).info(
-        "refresh done"
-    )
+            if sent == 0:
+                raise PublicationError(
+                    "Sonar publication failed", counted=bool(ctx.get("sonar_client"))
+                )
 
 
 async def _is_cancelled(session_factory, job_id: int) -> bool:

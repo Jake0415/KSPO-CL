@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password_bcrypt: str
     session_secret: str
-    session_max_age_seconds: int = 28_800  # 8h, 일과 기준
+    session_max_age_seconds: int = Field(default=28_800, ge=0)  # 0 disables session expiry
     login_max_attempts: int = 5
     login_lockout_seconds: int = 300  # 5 minutes
 
@@ -32,6 +33,9 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_refine_model: str = "gpt-5.4-mini"
+    refine_request_timeout_seconds: float = Field(default=60.0, gt=0)
+    refine_total_timeout_seconds: float = Field(default=125.0, gt=0)
+    refine_max_attempts: int = Field(default=2, ge=1, le=5)
     openai_embed_model: str = "text-embedding-3-large"
     openai_monthly_budget_krw: int = 150_000
 
@@ -68,10 +72,14 @@ class Settings(BaseSettings):
     crawl_user_agent_default: str = "kspo-ingest/0.2 (+admin@example.com)"
     storage_root: str = "/data"
     crawl_render_all_html: bool = True
+    crawl_dynamic_timeout_seconds: float = Field(default=30.0, gt=0)
     crawl_dynamic_max_actions: int = 100
     crawl_initial_ready_timeout_ms: int = 15000
     crawl_action_ready_timeout_ms: int = 5000
     crawl_content_stable_ms: int = 800
+
+    # Maximum simultaneous page refinement + publish operations per worker process.
+    postprocess_concurrency: int = Field(default=10, ge=1, le=10)
 
     # Refine
     ko_ratio_threshold: float = 0.30
@@ -84,6 +92,11 @@ class Settings(BaseSettings):
 
     # Board crawling
     board_freshness_days: int = 90  # 3-month window
+    board_max_pages: int = Field(default=50, ge=1, le=200)
+    board_max_seconds: int = Field(default=600, ge=1)
+    board_total_max_seconds: int = Field(default=1800, ge=1)
+    board_max_articles: int = Field(default=500, ge=1)
+    board_no_progress_pages: int = Field(default=3, ge=1)
 
     # Stealth / Proxy
     stealth_profile: str = ""  # chrome_win, chrome_mac, edge_win, firefox_win

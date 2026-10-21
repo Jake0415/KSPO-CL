@@ -29,8 +29,10 @@ async def refine_page(
         if await is_cancelled(s, job_id):
             return None
 
-        body_text = normalize_text(body_text)
-        result = await do_refine(title=title, body_text=body_text)
+    body_text = normalize_text(body_text)
+    result = await do_refine(title=title, body_text=body_text)
+
+    async with session_factory() as s:
 
         if result.usage is not None:
             await record_llm_usage(
@@ -42,6 +44,9 @@ async def refine_page(
                 model=result.model,
                 usage=result.usage,
             )
+
+        if await is_cancelled(s, job_id):
+            return None
 
         if result.drop:
             await _purge_existing_chunks(s, page_id=page_id)

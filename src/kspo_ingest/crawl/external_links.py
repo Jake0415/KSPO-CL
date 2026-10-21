@@ -42,7 +42,7 @@ def discover_external_links(html: str, *, base_url: str, source_host: str) -> li
         return []
     out: dict[str, ExternalLink] = {}
     for node in HTMLParser(html).css("a[href]"):
-        url = urljoin(base_url, node.attributes.get("href", ""))
+        url = urljoin(base_url, (node.attributes.get("href") or ""))
         p = urlsplit(url)
         if not public_url(url) or p.hostname == source_host:
             continue
@@ -71,7 +71,7 @@ def discover_external_links(html: str, *, base_url: str, source_host: str) -> li
         label = node.text(strip=True) or node.attributes.get("aria-label", "")
         if not label:
             image = node.css_first("img[alt]")
-            label = image.attributes["alt"] if image else p.hostname
+            label = (image.attributes.get("alt") or p.hostname) if image else p.hostname
         out.setdefault(url, ExternalLink(url, label))
     return list(out.values())
 
@@ -82,7 +82,7 @@ def external_metadata(html: str) -> tuple[str | None, str]:
     fields: dict[str, str] = {}
     for node in tree.css("meta[property], meta[name]"):
         key = node.attributes.get("property") or node.attributes.get("name")
-        value = node.attributes.get("content", "").strip()
+        value = (node.attributes.get("content") or "").strip()
         if key and value:
             fields.setdefault(key, value)
     title = fields.get("og:title") or fields.get("twitter:title")
@@ -106,7 +106,7 @@ def external_access_blocked(html: str) -> bool:
     """Do not index a sign-in/challenge wall as a social post."""
     tree = HTMLParser(html)
     text = tree.text(separator=" ", strip=True).lower()
-    description = " ".join(n.attributes.get("content", "") for n in tree.css("meta"))
+    description = " ".join((n.attributes.get("content") or "") for n in tree.css("meta"))
     text += " " + description.lower()
     return tree.css_first('input[type="password"]') is not None or any(
         phrase in text

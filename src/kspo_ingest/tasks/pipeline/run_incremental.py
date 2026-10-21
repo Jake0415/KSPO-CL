@@ -38,6 +38,12 @@ from kspo_ingest.tasks.pipeline.clean_page import clean_page
 from kspo_ingest.tasks.pipeline.extract_links import extract_links
 from kspo_ingest.tasks.pipeline.fetch_page import fetch_page
 from kspo_ingest.tasks.pipeline.helpers import mark_dropped
+from kspo_ingest.tasks.pipeline.parallel import (
+    PublicationError,
+    drain_processing,
+    processing_scope,
+    submit_postprocessing,
+)
 from kspo_ingest.tasks.pipeline.push_to_sonar import push_to_sonar
 from kspo_ingest.tasks.pipeline.refine_page import refine_page
 
@@ -46,8 +52,11 @@ log = get_logger("worker", "run_incremental")
 
 async def run_incremental(ctx: dict, *, job_id: int, domain_id: int) -> None:
     # Any failure in the incremental body must still leave a terminal job status.
-    async with job_guard(ctx["session_factory"], job_id):
-        await _run_incremental_impl(ctx, job_id=job_id, domain_id=domain_id)
+    async with (
+        job_guard(ctx["session_factory"], job_id),
+        processing_scope(ctx, job_id, domain_id) as run_ctx,
+    ):
+        await _run_incremental_impl(run_ctx, job_id=job_id, domain_id=domain_id)
 
 
 async def _run_incremental_impl(ctx: dict, *, job_id: int, domain_id: int) -> None:
@@ -73,6 +82,7 @@ async def _run_incremental_impl(ctx: dict, *, job_id: int, domain_id: int) -> No
         )
         urls: list[str] = [row[0] for row in rows.all()]
         from kspo_ingest.crawl.start_url import entry_urls
+
         job = await s.get(CrawlJob, job_id)
         for entry in entry_urls(domain, job):
             if entry not in urls:
@@ -101,7 +111,10 @@ async def _run_incremental_impl(ctx: dict, *, job_id: int, domain_id: int) -> No
                 error=type(exc).__name__,
             ).warning(f"page failed: {exc!s:.200}")
 
+    await drain_processing(ctx)
     async with session_factory() as s:
+        if await is_cancelled(s, job_id):
+            return
         await bump_stats(s, job_id, discovered=seed_count)
         await finish_crawl_job(s, job_id)
     log.bind(event="incremental_done", job_id=job_id, seed_count=seed_count).info("done")
@@ -134,6 +147,20 @@ async def _process_one(ctx: dict, *, job_id: int, domain_id: int, url: str) -> N
         # content_hash 미변경 — refine/chunk 생략
         return
 
+    await submit_postprocessing(
+        ctx,
+        job_id,
+        page_id,
+        lambda: _finish_page(
+            ctx, job_id=job_id, domain_id=domain_id, page_id=page_id, url=url, cleaned=cleaned
+        ),
+    )
+
+
+async def _finish_page(
+    ctx: dict, *, job_id: int, domain_id: int, page_id: int, url: str, cleaned: dict
+):
+    session_factory = ctx["session_factory"]
     # Budget guard — 월 예산 100% 초과 시 refine/embed skip
     session_factory = ctx.get("session_factory")
     if session_factory is not None:
@@ -143,7 +170,7 @@ async def _process_one(ctx: dict, *, job_id: int, domain_id: int, url: str) -> N
                     event="budget_exceeded_skip",
                     page_id=page_id,
                 ).warning("monthly budget exceeded — skip refine")
-                return
+                return False
 
     refined = await refine_page(
         ctx,
@@ -194,7 +221,7 @@ async def _process_one(ctx: dict, *, job_id: int, domain_id: int, url: str) -> N
             ).info(f"skip sonar push ({score.quadrant})")
             return
 
-        await push_to_sonar(
+        sent = await push_to_sonar(
             ctx,
             job_id=job_id,
             page_id=page_id,
@@ -202,9 +229,13 @@ async def _process_one(ctx: dict, *, job_id: int, domain_id: int, url: str) -> N
             summary=r.get("summary"),
             keywords=r.get("keywords") or [],
         )
+        if sent == 0:
+            raise PublicationError(
+                "Sonar publication failed", counted=bool(ctx.get("sonar_client"))
+            )
     else:
         # session_factory 없는 경우 (테스트 등) — quality gate 없이 push.
-        await push_to_sonar(
+        sent = await push_to_sonar(
             ctx,
             job_id=job_id,
             page_id=page_id,
@@ -212,3 +243,7 @@ async def _process_one(ctx: dict, *, job_id: int, domain_id: int, url: str) -> N
             summary=r.get("summary"),
             keywords=r.get("keywords") or [],
         )
+        if sent == 0:
+            raise PublicationError(
+                "Sonar publication failed", counted=bool(ctx.get("sonar_client"))
+            )

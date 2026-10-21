@@ -8,6 +8,7 @@
 - 페이지 없음 → FAILED
 - refine None → SUCCESS, chunk 미호출
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -24,11 +25,23 @@ class FakePage:
         self.url = url
         self.host = "example.com"  # Domain 조회 시 domain.host 접근용
         self.posted_at = None
+        self.storage_paths = {}
+
+
+@pytest.fixture(autouse=True)
+def isolate_pool_db_stats(monkeypatch):
+    monkeypatch.setattr("kspo_ingest.tasks.pipeline.parallel.bump_stats", AsyncMock())
+    monkeypatch.setattr(
+        "kspo_ingest.tasks.pipeline.parallel.is_cancelled", AsyncMock(return_value=False)
+    )
 
 
 def _make_factory(page=None):
     s = MagicMock()
-    s.get = AsyncMock(return_value=page)
+    from kspo_ingest.db.models import CrawlJob
+
+    job = CrawlJob(id=1, stats={})
+    s.get = AsyncMock(side_effect=lambda model, key: job if model is CrawlJob else page)
     s.commit = AsyncMock()
     factory = MagicMock()
     factory.return_value.__aenter__ = AsyncMock(return_value=s)
@@ -56,13 +69,11 @@ async def test_refresh_url_skipped_short_circuits(monkeypatch):
     monkeypatch.setattr(mod, "start_job", AsyncMock())
     monkeypatch.setattr(mod, "is_cancelled", AsyncMock(return_value=False))
     monkeypatch.setattr(mod, "fetch_page", AsyncMock(return_value=10))
-    monkeypatch.setattr(
-        mod, "clean_page", AsyncMock(return_value={"skipped": True, "page_id": 10})
-    )
+    monkeypatch.setattr(mod, "clean_page", AsyncMock(return_value={"skipped": True, "page_id": 10}))
     refine_called = AsyncMock()
     chunk_called = AsyncMock()
     monkeypatch.setattr(mod, "refine_page", refine_called)
-    monkeypatch.setattr(mod, "chunk_and_index", chunk_called)
+    monkeypatch.setattr(mod, "push_to_sonar", chunk_called)
     finish = AsyncMock()
     monkeypatch.setattr(mod, "finish_job", finish)
 
@@ -84,7 +95,7 @@ async def test_refresh_url_force_passes_to_clean(monkeypatch):
     clean_mock = AsyncMock(return_value={"skipped": True, "page_id": 10})
     monkeypatch.setattr(mod, "clean_page", clean_mock)
     monkeypatch.setattr(mod, "refine_page", AsyncMock())
-    monkeypatch.setattr(mod, "chunk_and_index", AsyncMock())
+    monkeypatch.setattr(mod, "push_to_sonar", AsyncMock())
     monkeypatch.setattr(mod, "finish_job", AsyncMock())
 
     await mod.refresh_url({"session_factory": factory}, job_id=1, page_id=10, force=True)
@@ -129,19 +140,18 @@ async def test_refresh_url_full_chain_when_changed(monkeypatch):
         ),
     )
     chunk_mock = AsyncMock()
-    monkeypatch.setattr(mod, "chunk_and_index", chunk_mock)
+    monkeypatch.setattr(mod, "push_to_sonar", chunk_mock)
     monkeypatch.setattr(mod, "bump_stats", AsyncMock())
     finish = AsyncMock()
     monkeypatch.setattr(mod, "finish_job", finish)
 
     # Quality scoring 경로 mock — refresh도 enqueue_seeds와 동일하게 점수/컬렉션 라우팅
-    fake_score = MagicMock(
-        quality_score=0.8, quadrant="Q1", freshness_score=0.5, trust_score=1.0
-    )
+    fake_score = MagicMock(quality_score=0.8, quadrant="Q1", freshness_score=0.5, trust_score=1.0)
     monkeypatch.setattr(mod, "score_document", MagicMock(return_value=fake_score))
     monkeypatch.setattr(mod, "upsert_doc_quality", AsyncMock())
     monkeypatch.setattr(
-        mod, "resolve_embedding_targets",
+        mod,
+        "resolve_embedding_targets",
         MagicMock(return_value=["tilellm", "kspo_knowledge"]),
     )
 
@@ -150,9 +160,8 @@ async def test_refresh_url_full_chain_when_changed(monkeypatch):
     chunk_mock.assert_awaited_once()
     args, kwargs = chunk_mock.call_args
     assert kwargs["refined_text"] == "정제된 본문"
-    assert kwargs["quadrant"] == "Q1"
-    assert kwargs["quality_score"] == 0.8
-    assert kwargs["collections"] == ["tilellm", "kspo_knowledge"]
+    assert kwargs["summary"] == "요약"
+    assert kwargs["keywords"] == ["k1"]
     args, kwargs = finish.call_args
     assert kwargs.get("status") == "SUCCESS"
 
@@ -214,7 +223,7 @@ async def test_refresh_url_refine_drop_skips_chunk(monkeypatch):
     )
     monkeypatch.setattr(mod, "refine_page", AsyncMock(return_value=None))
     chunk_mock = AsyncMock()
-    monkeypatch.setattr(mod, "chunk_and_index", chunk_mock)
+    monkeypatch.setattr(mod, "push_to_sonar", chunk_mock)
     monkeypatch.setattr(mod, "bump_stats", AsyncMock())
     monkeypatch.setattr(mod, "finish_job", AsyncMock())
 

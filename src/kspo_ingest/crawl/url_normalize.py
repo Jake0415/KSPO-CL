@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
+from kspo_ingest.crawl.board_identity import ARTICLE_IDS, BOARD_IDS, CURSORS, query_pairs
 
 # 트래킹·분석 파라미터 — 정규화 시 제거
 TRACKING_PARAMS: frozenset[str] = frozenset(
@@ -55,7 +57,12 @@ def _identity_qs(path: str, qs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """콘텐츠 정체성 파라미터만 남긴다 — 내비/검색 노이즈(searchWrd/searchCnd,
     조건부 menuNo) + 상세 페이지의 pageIndex 제거. url_hash와 canonical_url이 공유하는
     단일 규칙(둘의 정체성 정의가 어긋나지 않도록)."""
-    is_detail = path.endswith(_DETAIL_PATH_SUFFIX)
+    esafer_detail = path.endswith('/board.es') and any(
+        k == 'list_no' and v for k, v in qs
+    ) and ('act', 'view') in qs
+    is_detail = path.endswith(_DETAIL_PATH_SUFFIX) or esafer_detail or any(
+        k.lower() in ARTICLE_IDS and v for k, v in qs
+    )
     # menuNo is noise when the content is identified by something else: an
     # nttId/bbsId in the query, or a board page whose identity is the board code
     # in the path (eGov `/bbs/{code}/list.do|view.do`). A bare CMS page
@@ -80,6 +87,7 @@ def _identity_qs(path: str, qs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     navigation = {
         "page",
         "pageno",
+        "npage",
         "pageindex",
         "form_page_index",
         "_form_id",
@@ -87,11 +95,14 @@ def _identity_qs(path: str, qs: list[tuple[str, str]]) -> list[tuple[str, str]]:
         "form_page_list_count",
         "form_pc_page_count",
         "lastkey",
-    }
+    } | CURSORS
     return [
         (k, v)
         for (k, v) in qs
         if not _is_noise(k) and not (has_detail_identity and k.lower() in navigation)
+        and not (k.lower() == "topmenuseq" and any(
+            name.lower() in BOARD_IDS for name, _ in qs
+        ))
     ]
 
 
@@ -124,7 +135,7 @@ def canonical_url(raw: str) -> str:
     path = re.sub(r"/+", "/", parts.path or "/")
     qs = [
         (k, v)
-        for (k, v) in parse_qsl(parts.query, keep_blank_values=True)
+        for (k, v) in query_pairs(parts.query)
         if k not in TRACKING_PARAMS
     ]
     ident = sorted(_identity_qs(path, qs), key=lambda kv: kv[0])
@@ -158,7 +169,7 @@ def normalize_url(raw: str) -> tuple[str, str]:
     path = re.sub(r"/+", "/", path)
 
     # 쿼리: tracking 제거 + 정렬. value=None인 항목도 보존
-    qs = parse_qsl(parts.query, keep_blank_values=True)
+    qs = query_pairs(parts.query)
     qs = [(k, v) for (k, v) in qs if k not in TRACKING_PARAMS]
     qs.sort(key=lambda kv: kv[0])
     new_query = urlencode(qs)

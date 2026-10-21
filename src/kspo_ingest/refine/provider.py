@@ -2,8 +2,10 @@
 
 All providers use the OpenAI SDK. Gemini is accessed via OpenAI-compatible endpoint.
 """
+
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI
@@ -38,23 +40,24 @@ class LlmProvider:
         so the same prompt yields the same answer run-to-run — LLM inference is
         otherwise non-deterministic even at temperature 0.
         """
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(5),
-            wait=wait_exponential(multiplier=1, min=1, max=300),
-            retry=retry_if_exception_type(RETRYABLE_EXC),
-            reraise=True,
-        ):
-            with attempt:
-                kwargs: dict = {
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": temperature,
-                }
-                if seed is not None:
-                    kwargs["seed"] = seed
-                if response_format is not None:
-                    kwargs["response_format"] = response_format
-                return await self.client.chat.completions.create(**kwargs)
+        async with asyncio.timeout(settings.refine_total_timeout_seconds):
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.refine_max_attempts),
+                wait=wait_exponential(multiplier=1, min=1, max=4),
+                retry=retry_if_exception_type(RETRYABLE_EXC),
+                reraise=True,
+            ):
+                with attempt:
+                    kwargs: dict = {
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": temperature,
+                    }
+                    if seed is not None:
+                        kwargs["seed"] = seed
+                    if response_format is not None:
+                        kwargs["response_format"] = response_format
+                    return await self.client.chat.completions.create(**kwargs)
         raise RuntimeError("unreachable")  # pragma: no cover
 
 
@@ -73,7 +76,8 @@ def get_provider(name: str | None = None) -> LlmProvider:
             name="openai",
             client=AsyncOpenAI(
                 api_key=settings.openai_api_key,
-                timeout=60.0,
+                timeout=settings.refine_request_timeout_seconds,
+                max_retries=0,
             ),
             model=settings.openai_refine_model,
         )
@@ -83,7 +87,8 @@ def get_provider(name: str | None = None) -> LlmProvider:
             client=AsyncOpenAI(
                 api_key=settings.gemini_api_key,
                 base_url=settings.gemini_base_url,
-                timeout=60.0,
+                timeout=settings.refine_request_timeout_seconds,
+                max_retries=0,
             ),
             model=settings.gemini_model,
         )

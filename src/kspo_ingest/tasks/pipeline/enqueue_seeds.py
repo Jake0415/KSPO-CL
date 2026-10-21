@@ -10,11 +10,10 @@ v2: Quality scoring + publish gate 통합.
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 from sqlalchemy import delete, select
 
 from kspo_ingest.crawl.board import classify_freshness
+from kspo_ingest.crawl.board_identity import is_board_owned_link
 from kspo_ingest.crawl.frontier import Frontier
 from kspo_ingest.crawl.sitemap import discover_sitemap_urls, parse_sitemap
 from kspo_ingest.crawl.soma import is_board_article
@@ -25,39 +24,39 @@ from kspo_ingest.quality.embedding_policy import resolve_embedding_targets
 from kspo_ingest.quality.gate import upsert_doc_quality
 from kspo_ingest.quality.scorer import ScorerInput, score_document
 from kspo_ingest.settings import settings
-from kspo_ingest.tasks.jobs import bump_stats, finish_job, is_cancelled, job_guard, start_job
+from kspo_ingest.tasks.jobs import (
+    bump_stats,
+    finish_crawl_job,
+    finish_job,
+    is_cancelled,
+    job_guard,
+    locked_job,
+    start_job,
+)
 from kspo_ingest.tasks.pipeline.clean_page import clean_page
 from kspo_ingest.tasks.pipeline.extract_links import extract_links
 from kspo_ingest.tasks.pipeline.fetch_page import fetch_page
 from kspo_ingest.tasks.pipeline.helpers import mark_dropped
+from kspo_ingest.tasks.pipeline.parallel import (
+    PublicationError,
+    drain_processing,
+    processing_scope,
+    submit_postprocessing,
+)
 from kspo_ingest.tasks.pipeline.push_to_sonar import push_to_sonar
 from kspo_ingest.tasks.pipeline.refine_page import refine_page
 
 log = get_logger("worker", "enqueue_seeds")
 
 
-def is_board_owned_link(url: str, *, confirmed_list_urls: set[str]) -> bool:
-    """이 URL이 confirmed board_source(list_url) 소유의 페이지네이션/상세 링크인가.
-
-    board list_url의 경로 prefix를 공유하면서 pageNo= 또는 view.do 형태면 True.
-    """
-    p = urlparse(url)
-    base_dir = p.path.rsplit("/", 1)[0]
-    for lu in confirmed_list_urls:
-        lp = urlparse(lu)
-        if lp.netloc != p.netloc:
-            continue
-        if base_dir == lp.path.rsplit("/", 1)[0] and (
-            "pageNo=" in (p.query or "") or "view.do" in p.path.lower()
-        ):
-            return True
-    return False
-
 
 async def enqueue_seeds(ctx: dict, *, job_id: int, domain_id: int) -> None:
     # Any failure in the BFS body must still leave a terminal job status.
-    async with job_guard(ctx["session_factory"], job_id):
-        await _enqueue_seeds_impl(ctx, job_id=job_id, domain_id=domain_id)
+    async with (
+        job_guard(ctx["session_factory"], job_id),
+        processing_scope(ctx, job_id, domain_id) as run_ctx,
+    ):
+        await _enqueue_seeds_impl(run_ctx, job_id=job_id, domain_id=domain_id)
 
 
 async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None:
@@ -127,6 +126,7 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
         f"list_states:{job_id}",
         f"blocked_lists:{job_id}",
         f"content_states:{job_id}",
+        f"admitted:{job_id}",
         f"repeated_lists:{job_id}",
     )
 
@@ -173,6 +173,13 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
         from kspo_ingest.crawl.loop_guard import list_family
 
         family = list_family(url)
+        async with session_factory() as s:
+            owned = set((await s.execute(select(BoardSource.list_url).where(
+                BoardSource.domain_id == domain_id, BoardSource.status == "confirmed"
+            ))).scalars().all())
+        if is_board_owned_link(url, confirmed_list_urls=owned):
+            await frontier.ack(job_id, url)
+            continue
         if family and await frontier.redis.sismember(f"blocked_lists:{job_id}", family):
             await frontier.ack(job_id, url)
             await frontier.redis.incr(f"repeated_lists:{job_id}")
@@ -241,70 +248,14 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
                 processed += 1
                 continue
 
-            # Budget guard — 월 예산 100% 초과 시 refine/embed skip
-            async with session_factory() as s:
-                if await is_budget_exceeded(s):
-                    log.bind(
-                        event="budget_exceeded_skip",
-                        page_id=page_id,
-                    ).warning("monthly budget exceeded — skip refine")
-                    await frontier.ack(job_id, url)
-                    processed += 1
-                    continue
-
-            refined = await refine_page(
+            await submit_postprocessing(
                 ctx,
-                job_id=job_id,
-                page_id=page_id,
-                title=cleaned["title"],
-                body_text=cleaned["body_text"],
-                content_hash=cleaned["content_hash"],
+                job_id,
+                page_id,
+                lambda pid=page_id, u=url, body=cleaned: _finish_page(
+                    ctx, job_id=job_id, domain_id=domain_id, page_id=pid, url=u, cleaned=body
+                ),
             )
-
-            if refined and refined.get("refined"):
-                r = refined["refined"]
-
-                # Quality scoring + quadrant 배정
-                async with session_factory() as s:
-                    domain = await s.get(Domain, domain_id)
-                    domain_host = domain.host if domain else ""
-                    page_row = await s.get(Page, page_id)
-                    page_posted_at = getattr(page_row, "posted_at", None) if page_row else None
-
-                score = score_document(
-                    ScorerInput(
-                        title=cleaned["title"],
-                        body_text=cleaned["body_text"],
-                        extraction_method=cleaned.get("method", "heuristic"),
-                        posted_at=page_posted_at,
-                        summary=r.get("summary"),
-                        keywords=r.get("keywords") or [],
-                        is_meaningful=True,  # refine 통과했으므로
-                        domain_host=domain_host,
-                    )
-                )
-
-                async with session_factory() as s:
-                    await upsert_doc_quality(s, page_id=page_id, score=score)
-
-                # Embedding policy: quadrant별 대상 컬렉션 결정
-                targets = resolve_embedding_targets(score, url=url)
-                if targets:
-                    await push_to_sonar(
-                        ctx,
-                        job_id=job_id,
-                        page_id=page_id,
-                        refined_text=r["refined_text"],
-                        summary=r.get("summary"),
-                        keywords=r.get("keywords") or [],
-                    )
-                else:
-                    log.bind(
-                        event="embedding_policy_skip",
-                        page_id=page_id,
-                        quadrant=score.quadrant,
-                        quality=score.quality_score,
-                    ).info(f"skip embed ({score.quadrant})")
         except Exception as exc:
             async with session_factory() as error_session:
                 await bump_stats(error_session, job_id, errors=1)
@@ -315,6 +266,10 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
         await frontier.ack(job_id, url)
         processed += 1
 
+    await drain_processing(ctx)
+    async with session_factory() as s:
+        if await is_cancelled(s, job_id):
+            return
     await _save_navigation_stats(ctx, job_id)
     async with session_factory() as s:
         job = await s.get(CrawlJob, job_id)
@@ -327,15 +282,11 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
                 if processed >= max_pages or await frontier.redis.get(f"url_limit:{job_id}")
                 else "queue_exhausted"
             )
+            if job.stats["termination_reason"] == "url_limit":
+                job.stats["collection_partial"] = True
             flag_modified(job, "stats")
             await s.commit()
-        failed = not (job.stats or {}).get("fetched", 0) and (job.stats or {}).get("errors", 0)
-        await finish_job(
-            s,
-            job_id,
-            status="FAILED" if failed else "SUCCESS",
-            error="No page fetched" if failed else None,
-        )
+        await finish_crawl_job(s, job_id)
 
     log.bind(
         event="enqueue_seeds_done",
@@ -343,6 +294,78 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
         domain_id=domain_id,
         processed=processed,
     ).info("BFS done")
+
+
+async def _finish_page(
+    ctx: dict, *, job_id: int, domain_id: int, page_id: int, url: str, cleaned: dict
+):
+    session_factory = ctx["session_factory"]
+    # Budget guard — 월 예산 100% 초과 시 refine/embed skip
+    async with session_factory() as s:
+        if await is_budget_exceeded(s):
+            log.bind(
+                event="budget_exceeded_skip",
+                page_id=page_id,
+            ).warning("monthly budget exceeded — skip refine")
+            return False
+
+    refined = await refine_page(
+        ctx,
+        job_id=job_id,
+        page_id=page_id,
+        title=cleaned["title"],
+        body_text=cleaned["body_text"],
+        content_hash=cleaned["content_hash"],
+    )
+
+    if refined and refined.get("refined"):
+        r = refined["refined"]
+
+        # Quality scoring + quadrant 배정
+        async with session_factory() as s:
+            domain = await s.get(Domain, domain_id)
+            domain_host = domain.host if domain else ""
+            page_row = await s.get(Page, page_id)
+            page_posted_at = getattr(page_row, "posted_at", None) if page_row else None
+
+        score = score_document(
+            ScorerInput(
+                title=cleaned["title"],
+                body_text=cleaned["body_text"],
+                extraction_method=cleaned.get("method", "heuristic"),
+                posted_at=page_posted_at,
+                summary=r.get("summary"),
+                keywords=r.get("keywords") or [],
+                is_meaningful=True,  # refine 통과했으므로
+                domain_host=domain_host,
+            )
+        )
+
+        async with session_factory() as s:
+            await upsert_doc_quality(s, page_id=page_id, score=score)
+
+        # Embedding policy: quadrant별 대상 컬렉션 결정
+        targets = resolve_embedding_targets(score, url=url)
+        if targets:
+            sent = await push_to_sonar(
+                ctx,
+                job_id=job_id,
+                page_id=page_id,
+                refined_text=r["refined_text"],
+                summary=r.get("summary"),
+                keywords=r.get("keywords") or [],
+            )
+            if sent == 0:
+                raise PublicationError(
+                    "Sonar publication failed", counted=bool(ctx.get("sonar_client"))
+                )
+        else:
+            log.bind(
+                event="embedding_policy_skip",
+                page_id=page_id,
+                quadrant=score.quadrant,
+                quality=score.quality_score,
+            ).info(f"skip embed ({score.quadrant})")
 
 
 async def _enqueue_discovered(
@@ -403,11 +426,11 @@ def _remove_site_storage(storage_path, domain_id: int, old_page_ids: list[int]) 
             shutil.rmtree(target)
 
 
-async def _save_navigation_stats(ctx: dict, job_id: int) -> None:
+async def _save_navigation_stats(ctx: dict, job_id: int, *, extra: dict | None = None) -> None:
     from sqlalchemy.orm.attributes import flag_modified
 
-    from kspo_ingest.db.models import CrawlJob
-
+    if "frontier" not in ctx:
+        return
     frontier = ctx["frontier"]
     redis = frontier.redis
     values = {
@@ -418,8 +441,8 @@ async def _save_navigation_stats(ctx: dict, job_id: int) -> None:
         "repeated_lists": int(await redis.get(f"repeated_lists:{job_id}") or 0),
     }
     async with ctx["session_factory"]() as s:
-        job = await s.get(CrawlJob, job_id)
+        job = await locked_job(s, job_id)
         if job:
-            job.stats = {**(job.stats or {}), **values}
+            job.stats = {**(job.stats or {}), **values, **(extra or {})}
             flag_modified(job, "stats")
             await s.commit()

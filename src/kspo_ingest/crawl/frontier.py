@@ -22,6 +22,9 @@ class Frontier:
     async def enqueue(self, job_id: int, url: str, depth: int) -> bool:
         """url을 정규화 후 frontier에 push. 이미 seen에 있으면 False."""
         normalized, url_hash = normalize_url(url)
+        limit = int(await self.redis.get(f"crawl_limit:{job_id}") or 30000)
+        if not await self.reserve_discovery(job_id, normalized, limit=limit):
+            return False
         added = await self.redis.eval(
             """
             if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then
@@ -47,6 +50,8 @@ class Frontier:
 
     async def admit_direct(self, job_id: int, url: str, *, limit: int = 30000) -> bool:
         """Reserve a board URL under the same full-job unique URL budget."""
+        if not await self.reserve_discovery(job_id, url, limit=limit):
+            return False
         _, url_hash = normalize_url(url)
         return bool(
             await self.redis.eval(
@@ -64,6 +69,18 @@ class Frontier:
                 str(min(limit, 30000)),
             )
         )
+
+    async def reserve_discovery(self, job_id: int, url: str, *, limit: int) -> bool:
+        """Atomically admit URLs before DB insert, including not-yet-queued links."""
+        _, url_hash = normalize_url(url)
+        return bool(await self.redis.eval("""
+            if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then return 1 end
+            if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[2]) then
+                redis.call('SET', KEYS[2], '1'); return 0
+            end
+            redis.call('SADD', KEYS[1], ARGV[1]); return 1
+        """, 2, f"admitted:{job_id}", f"url_limit:{job_id}", url_hash,
+            str(max(1, min(limit, 30000)))))
 
     async def dequeue(self, job_id: int) -> tuple[str, int] | None:
         raw = await self.redis.lpop(self._k_frontier(job_id))

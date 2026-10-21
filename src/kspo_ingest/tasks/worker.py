@@ -56,6 +56,9 @@ log = get_logger("worker", "settings")
 
 
 async def on_startup(ctx: dict) -> None:
+    import asyncio
+
+    ctx["postprocess_slots"] = asyncio.BoundedSemaphore(settings.postprocess_concurrency)
     redis = Redis.from_url(settings.redis_url)
 
     # 세션 매니저 — 커넥션 풀 재사용
@@ -73,6 +76,7 @@ async def on_startup(ctx: dict) -> None:
         default_profile=settings.stealth_profile or None,
         headless=True,
         dynamic_max_actions=settings.crawl_dynamic_max_actions,
+        dynamic_timeout_seconds=settings.crawl_dynamic_timeout_seconds,
         readiness_policy=ReadinessPolicy(
             initial_timeout_ms=settings.crawl_initial_ready_timeout_ms,
             action_timeout_ms=settings.crawl_action_ready_timeout_ms,

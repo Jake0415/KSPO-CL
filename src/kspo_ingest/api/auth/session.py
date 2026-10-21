@@ -24,7 +24,7 @@ def session_user(request: Request) -> str | None:
         return None
     iat = int(sess.get("iat", 0))
     age = int(datetime.now(UTC).timestamp()) - iat
-    if age > settings.session_max_age_seconds:
+    if settings.session_max_age_seconds > 0 and age > settings.session_max_age_seconds:
         request.session.pop("admin", None)
         return None
     return sess.get("u")

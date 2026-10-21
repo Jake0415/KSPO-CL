@@ -8,14 +8,19 @@ board_refresh는 confirmed board_source 순회로 리스트 페이지에서 신�
 posted_at 없이 process_board_page 파이프라인을 재사용 — clean/refine 과정에서 HTML
 파싱으로 posted_at이 채워질 수 있고, 없으면 None 그대로 진행.
 """
+
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from kspo_ingest.db.models import Page
 from kspo_ingest.observability.logger import get_logger
-from kspo_ingest.tasks.jobs import finish_job, is_cancelled, job_guard, start_job
+from kspo_ingest.tasks.jobs import finish_crawl_job, finish_job, is_cancelled, job_guard, start_job
 from kspo_ingest.tasks.pipeline.board_page import process_board_page
+from kspo_ingest.tasks.pipeline.parallel import (
+    drain_processing,
+    processing_scope,
+)
 
 log = get_logger("worker", "run_uncollected_backfill")
 
@@ -23,13 +28,14 @@ log = get_logger("worker", "run_uncollected_backfill")
 async def run_uncollected_backfill(
     ctx: dict, *, job_id: int, domain_id: int, limit: int = 5000
 ) -> None:
-    async with job_guard(ctx["session_factory"], job_id):
-        await _run_impl(ctx, job_id=job_id, domain_id=domain_id, limit=limit)
+    async with (
+        job_guard(ctx["session_factory"], job_id),
+        processing_scope(ctx, job_id, domain_id) as run_ctx,
+    ):
+        await _run_impl(run_ctx, job_id=job_id, domain_id=domain_id, limit=limit)
 
 
-async def _run_impl(
-    ctx: dict, *, job_id: int, domain_id: int, limit: int
-) -> None:
+async def _run_impl(ctx: dict, *, job_id: int, domain_id: int, limit: int) -> None:
     session_factory = ctx["session_factory"]
 
     async with session_factory() as s:
@@ -38,8 +44,11 @@ async def _run_impl(
             select(Page.id, Page.url, Page.posted_at, Page.board_source_id)
             .where(
                 Page.domain_id == domain_id,
-                Page.status.in_(("DISCOVERED", "ERROR")),
-                Page.content_hash.is_(None),
+                Page.status.in_(("DISCOVERED", "ERROR", "CLEANED", "REFINED")),
+                or_(
+                    Page.content_hash.is_(None),
+                    Page.storage_paths["processing_pending"].as_boolean().is_(True),
+                ),
             )
             .limit(limit)
         )
@@ -68,9 +77,9 @@ async def _run_impl(
                 posted_at=posted_at,
             )
         except Exception as exc:
-            log.bind(
-                event="uncollected_backfill_error", url=url, err=str(exc)
-            ).warning("skip")
+            log.bind(event="uncollected_backfill_error", url=url, err=str(exc)).warning("skip")
 
+    await drain_processing(ctx)
     async with session_factory() as s:
-        await finish_job(s, job_id, status="SUCCESS")
+        if not await is_cancelled(s, job_id):
+            await finish_crawl_job(s, job_id)

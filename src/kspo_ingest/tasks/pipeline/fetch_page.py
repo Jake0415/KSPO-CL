@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+from kspo_ingest.attach.discovery import is_attachment_url, is_binary_content
 from kspo_ingest.crawl.external_fetch import fetch_external, validate_destination
 from kspo_ingest.crawl.fetcher import ResponseTooLargeError
 from kspo_ingest.crawl.start_url import browser_required
@@ -42,6 +43,11 @@ async def fetch_page(ctx: dict, *, job_id: int, domain_id: int, url: str, depth:
         page = await get_or_create_page(s, domain_id=domain_id, url=url, depth=depth)
         domain = await get_domain(s, domain_id)
         if domain is None:
+            return None
+
+        if is_attachment_url(url):
+            await mark_dropped(s, page.id, reason="attachment_metadata_only")
+            await bump_stats(s, job_id, dropped=1, drop_reasons__attachment_metadata_only=1)
             return None
 
         ua = domain.user_agent or settings.crawl_user_agent_default
@@ -128,6 +134,11 @@ async def fetch_page(ctx: dict, *, job_id: int, domain_id: int, url: str, depth:
         if result.http_status >= 400:
             await mark_error(s, page.id, error=f"http_{result.http_status}")
             await bump_stats(s, job_id, errors=1)
+            return None
+
+        if is_binary_content(result.raw_bytes, result.content_type):
+            await mark_dropped(s, page.id, reason="attachment_metadata_only")
+            await bump_stats(s, job_id, dropped=1, drop_reasons__attachment_metadata_only=1)
             return None
 
         if getattr(result, "discovery_report", None):

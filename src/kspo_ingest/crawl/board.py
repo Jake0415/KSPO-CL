@@ -27,6 +27,7 @@ _ONCLICK_ID_RE = re.compile(r"[A-Za-z_]\w*\(\s*['\"]?(\d+)")
 class BoardItem:
     url: str
     posted_at: datetime
+    is_notice: bool = False
 
 
 def _parse_date(text: str) -> datetime | None:
@@ -48,6 +49,11 @@ def _is_notice_row(row) -> bool:
     cls = (row.attributes.get("class") or "").lower()
     if "notice" in cls:
         return True
+    if row.css_first('.icon_notice, .badge-notice, [data-notice="true"]') is not None:
+        return True
+    for icon in row.css("img[alt]"):
+        if (icon.attributes.get("alt") or "").strip().lower() in _NOTICE_MARKERS:
+            return True
     first_cell = row.css_first("td")
     if first_cell is not None:
         txt = first_cell.text(strip=True).lower()
@@ -56,7 +62,48 @@ def _is_notice_row(row) -> bool:
     return False
 
 
-def _onclick_detail_url(base_url: str, item_id: str) -> str:
+def _script_detail_url(html: str, base_url: str, call: str, item_id: str) -> str | None:
+    """Resolve only literal read-only actions and their ID argument; never execute JS."""
+    fn = re.search(r"([A-Za-z_]\w*)\(\s*['\"]?\d+", call)
+    if not fn:
+        return None
+    script = re.sub(r"/\*[\s\S]*?\*/", "", html)
+    definition = re.search(
+        r"function\s+" + re.escape(fn[1]) + r"\s*\(\s*(\w+)[^)]*\)\s*\{([^}]{0,5000})\}", script
+    )
+    if not definition:
+        return None
+    argument, body = definition.groups()
+    route = re.search(r"['\"](/[^'\"\s]+\.(?:do|kspo)(?:\?[^'\"]*)?)['\"]", body)
+    if not route or not re.search(r"view|detail", route[1], re.I):
+        return None
+    key = re.search(r"['\"][?&](\w+)=['\"]\s*\+\s*" + re.escape(argument) + r"\b", body)
+    tree = HTMLParser(html)
+    if key:
+        param = key[1]
+    else:
+        field = re.search(
+            r"\$\(['\"]#([\w-]+)['\"]\)\.val\(\s*" + re.escape(argument) + r"\s*\)", body
+        )
+        if not field:
+            return None
+        node = tree.css_first('[id="' + field[1] + '"]')
+        param = (node.attributes.get("name") if node else None) or field[1]
+    target = urlsplit(urljoin(base_url, route[1]))
+    if target.hostname != urlsplit(base_url).hostname:
+        return None
+    query = [(k, v) for k, v in parse_qsl(target.query) if k != param]
+    # Retain static board identity, not user search criteria or empty values.
+    for node in tree.css('input[type="hidden"][name]'):
+        name = node.attributes.get("name") or ""
+        value = node.attributes.get("value") or ""
+        if name in {"board_id", "boardId", "boardSeq", "board_seq", "bbsId", "menuNo"} and value:
+            query.append((name, value))
+    query.append((param, item_id))
+    return f"{target.scheme}://{target.netloc}{target.path}?{urlencode(dict(query))}"
+
+
+def _onclick_detail_url(base_url: str, item_id: str) -> str | None:
     """onclick 기반 링크의 상세 URL 생성.
 
     두 가지 상세 URL 방식을 지원한다:
@@ -93,6 +140,9 @@ def _onclick_detail_url(base_url: str, item_id: str) -> str:
         if segs and segs[-1].isdigit():
             segs = segs[:-1]
         return f"{parts.scheme}://{parts.netloc}/" + "/".join([*segs, item_id])
+    # Unknown action endpoints need explicit navigation evidence, not invented paths.
+    if path.lower().endswith((".do", ".kspo")):
+        return None
     # 그 외(kboat·kcycle fnMoveDetail): 목록 경로에 /{id} 부착.
     return f"{base_url.split('?', 1)[0].rstrip('/')}/{item_id}"
 
@@ -121,7 +171,11 @@ def extract_board_items(html: str, *, base_url: str) -> list[BoardItem]:
             m = _ONCLICK_ID_RE.search(js)
             if not m:
                 continue
-            absolute = _onclick_detail_url(base_url, m.group(1))
+            absolute = _script_detail_url(html, base_url, js, m.group(1)) or _onclick_detail_url(
+                base_url, m.group(1)
+            )
+            if absolute is None:
+                continue
             if urlsplit(base_url).hostname == "soma.kspo.or.kr":
                 soma = re.search(r"goDetail\(['\"](\d+)['\"]\s*,\s*['\"]([A-Za-z0-9]+)['\"]", js)
                 if soma and urlsplit(base_url).path.startswith("/customer/notice/"):
@@ -137,7 +191,7 @@ def extract_board_items(html: str, *, base_url: str) -> list[BoardItem]:
         if absolute in seen:
             continue
         seen.add(absolute)
-        items.append(BoardItem(url=absolute, posted_at=posted_at))
+        items.append(BoardItem(url=absolute, posted_at=posted_at, is_notice=_is_notice_row(row)))
     return items
 
 
@@ -151,6 +205,17 @@ def is_within_freshness(
         now = datetime.now(UTC)
     cutoff = now - timedelta(days=freshness_days)
     return posted_at >= cutoff
+
+
+def is_old_board_page(
+    items: list[BoardItem], *, freshness_days: int = 90, now: datetime | None = None
+) -> bool:
+    """Pinned notices do not determine the chronological pagination boundary."""
+    ordinary = [item for item in items if not item.is_notice]
+    return bool(ordinary) and all(
+        not is_within_freshness(item.posted_at, freshness_days=freshness_days, now=now)
+        for item in ordinary
+    )
 
 
 def classify_freshness(

@@ -3,6 +3,7 @@
 실제 OpenAI / Qdrant 호출 없이 monkeypatch로 stub. fetch_page도 mock하여
 HTTP 호출은 발생하지 않는다.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -25,7 +26,14 @@ class FakeDomain:
 def _make_session_factory(domain=None, urls=()):
     """run_incremental 진입에서 session_factory를 한 번 호출하여 domain 조회 + URL 수집."""
     s = MagicMock()
-    s.get = AsyncMock(return_value=domain)
+    from kspo_ingest.db.models import CrawlJob, Domain
+
+    job = CrawlJob(id=1, stats={})
+    s.get = AsyncMock(
+        side_effect=lambda model, key: (
+            domain if model is Domain else job if model is CrawlJob else None
+        )
+    )
 
     rows_result = MagicMock()
     rows_result.all = MagicMock(return_value=[(u,) for u in urls])
@@ -54,6 +62,7 @@ async def test_run_incremental_iterates_existing_pages_plus_root(monkeypatch):
     monkeypatch.setattr(inc_mod, "is_cancelled", AsyncMock(return_value=False))
     monkeypatch.setattr(inc_mod, "start_job", AsyncMock())
     monkeypatch.setattr(inc_mod, "finish_job", AsyncMock())
+    monkeypatch.setattr(inc_mod, "finish_crawl_job", inc_mod.finish_job)
     monkeypatch.setattr(inc_mod, "bump_stats", AsyncMock())
 
     ctx = {"session_factory": factory}
@@ -82,6 +91,7 @@ async def test_run_incremental_root_already_in_pages_no_duplicate(monkeypatch):
     monkeypatch.setattr(inc_mod, "is_cancelled", AsyncMock(return_value=False))
     monkeypatch.setattr(inc_mod, "start_job", AsyncMock())
     monkeypatch.setattr(inc_mod, "finish_job", AsyncMock())
+    monkeypatch.setattr(inc_mod, "finish_crawl_job", inc_mod.finish_job)
     monkeypatch.setattr(inc_mod, "bump_stats", AsyncMock())
 
     ctx = {"session_factory": factory}
@@ -153,10 +163,15 @@ async def test_process_one_skips_chunk_when_clean_returns_skipped(monkeypatch):
     refine_called = AsyncMock()
     chunk_called = AsyncMock()
     monkeypatch.setattr(inc_mod, "extract_links", AsyncMock())
+    monkeypatch.setattr(inc_mod, "is_budget_exceeded", AsyncMock(return_value=False))
+    monkeypatch.setattr(inc_mod, "upsert_doc_quality", AsyncMock())
+    monkeypatch.setattr(inc_mod, "resolve_embedding_targets", lambda *a, **k: ["test"])
     monkeypatch.setattr(inc_mod, "refine_page", refine_called)
-    monkeypatch.setattr(inc_mod, "chunk_and_index", chunk_called)
+    monkeypatch.setattr(inc_mod, "push_to_sonar", chunk_called)
 
-    await inc_mod._process_one({}, job_id=1, domain_id=1, url="https://x/")
+    await inc_mod._process_one(
+        {"session_factory": _make_session_factory()}, job_id=1, domain_id=1, url="https://x/"
+    )
 
     refine_called.assert_not_awaited()
     chunk_called.assert_not_awaited()
@@ -179,6 +194,9 @@ async def test_process_one_runs_full_chain_when_changed(monkeypatch):
         ),
     )
     monkeypatch.setattr(inc_mod, "extract_links", AsyncMock())
+    monkeypatch.setattr(inc_mod, "is_budget_exceeded", AsyncMock(return_value=False))
+    monkeypatch.setattr(inc_mod, "upsert_doc_quality", AsyncMock())
+    monkeypatch.setattr(inc_mod, "resolve_embedding_targets", lambda *a, **k: ["test"])
     monkeypatch.setattr(
         inc_mod,
         "refine_page",
@@ -195,9 +213,11 @@ async def test_process_one_runs_full_chain_when_changed(monkeypatch):
         ),
     )
     chunk_called = AsyncMock()
-    monkeypatch.setattr(inc_mod, "chunk_and_index", chunk_called)
+    monkeypatch.setattr(inc_mod, "push_to_sonar", chunk_called)
 
-    await inc_mod._process_one({}, job_id=1, domain_id=1, url="https://x/")
+    await inc_mod._process_one(
+        {"session_factory": _make_session_factory()}, job_id=1, domain_id=1, url="https://x/"
+    )
 
     chunk_called.assert_awaited_once()
     args, kwargs = chunk_called.call_args
@@ -210,7 +230,9 @@ async def test_process_one_fetch_none_short_circuits(monkeypatch):
     monkeypatch.setattr(inc_mod, "fetch_page", AsyncMock(return_value=None))
     clean = AsyncMock()
     monkeypatch.setattr(inc_mod, "clean_page", clean)
-    await inc_mod._process_one({}, job_id=1, domain_id=1, url="https://x/")
+    await inc_mod._process_one(
+        {"session_factory": _make_session_factory()}, job_id=1, domain_id=1, url="https://x/"
+    )
     clean.assert_not_awaited()
 
 
@@ -231,11 +253,16 @@ async def test_process_one_refine_drop_short_circuits(monkeypatch):
         ),
     )
     monkeypatch.setattr(inc_mod, "extract_links", AsyncMock())
+    monkeypatch.setattr(inc_mod, "is_budget_exceeded", AsyncMock(return_value=False))
+    monkeypatch.setattr(inc_mod, "upsert_doc_quality", AsyncMock())
+    monkeypatch.setattr(inc_mod, "resolve_embedding_targets", lambda *a, **k: ["test"])
     monkeypatch.setattr(inc_mod, "refine_page", AsyncMock(return_value=None))
     chunk_called = AsyncMock()
-    monkeypatch.setattr(inc_mod, "chunk_and_index", chunk_called)
+    monkeypatch.setattr(inc_mod, "push_to_sonar", chunk_called)
 
-    await inc_mod._process_one({}, job_id=1, domain_id=1, url="https://x/")
+    await inc_mod._process_one(
+        {"session_factory": _make_session_factory()}, job_id=1, domain_id=1, url="https://x/"
+    )
     chunk_called.assert_not_awaited()
 
 

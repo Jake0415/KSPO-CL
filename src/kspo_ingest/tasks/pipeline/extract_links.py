@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from kspo_ingest.attach.discovery import (
@@ -21,6 +22,7 @@ from kspo_ingest.attach.discovery import (
     discover_attachments,
     url_hash_sha256,
 )
+from kspo_ingest.clean.encoding import detect_encoding
 from kspo_ingest.crawl import storage as storage_paths
 from kspo_ingest.crawl.board import classify_board_list
 from kspo_ingest.crawl.board_detect import upsert_board_candidate
@@ -30,7 +32,7 @@ from kspo_ingest.crawl.external_links import discover_external_links
 from kspo_ingest.crawl.internal_links import discover_internal_links
 from kspo_ingest.crawl.soma import discover_urls
 from kspo_ingest.crawl.url_normalize import normalize_url
-from kspo_ingest.db.models import Attachment, Domain, Page
+from kspo_ingest.db.models import Attachment, BoardSource, Domain, Page
 from kspo_ingest.observability.logger import get_logger
 from kspo_ingest.tasks.jobs import is_cancelled
 
@@ -68,7 +70,8 @@ async def extract_links(ctx: dict, *, job_id: int, page_id: int) -> dict[str, in
             log.bind(event="extract_links_no_raw", page_id=page_id).debug("raw missing")
             return {"attachments": 0, "discovered": 0}
 
-        html = raw_path.read_bytes().decode("utf-8", errors="replace")
+        raw = raw_path.read_bytes()
+        html = raw.decode(detect_encoding(raw, page.content_type), errors="replace")
         domain_id = page.domain_id
         base_url = (page.storage_paths or {}).get("final_url") or page.url
 
@@ -197,6 +200,12 @@ async def _upsert_discovered_pages(
     urls = crawlable_link_urls(
         html, base_url=(page.storage_paths or {}).get("final_url") or page.url, host=domain.host
     )
+    from kspo_ingest.crawl.board_identity import is_board_owned_link
+
+    confirmed = set((await s.execute(select(BoardSource.list_url).where(
+        BoardSource.domain_id == domain.id, BoardSource.status == "confirmed"
+    ))).scalars().all())
+    urls = [u for u in urls if not is_board_owned_link(u, confirmed_list_urls=confirmed)]
     if not urls:
         return 0
 
@@ -231,6 +240,13 @@ async def _upsert_discovered_pages(
         if url_hash in seen_hashes:
             continue
         seen_hashes.add(url_hash)
+        if redis is not None and job_id is not None:
+            from kspo_ingest.crawl.frontier import Frontier
+
+            if not await Frontier(redis).reserve_discovery(
+                job_id, normalized, limit=min(domain.max_pages or 30000, 30000)
+            ):
+                continue
         rows.append(
             {
                 "domain_id": page.domain_id,

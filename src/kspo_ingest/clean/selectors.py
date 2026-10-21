@@ -32,7 +32,7 @@ def apply_blacklist(
     html: str, global_selectors: list[str], domain_selectors: list[str] | None
 ) -> str:
     """selectolax로 매칭 노드 .decompose() 후 HTML 반환."""
-    tree = HTMLParser(html)
+    tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     selectors = [*global_selectors, *(domain_selectors or [])]
     for sel in selectors:
         try:

@@ -18,6 +18,7 @@ from kspo_ingest.tasks.pipeline.clean_page import clean_page
 from kspo_ingest.tasks.pipeline.extract_links import extract_links
 from kspo_ingest.tasks.pipeline.fetch_page import fetch_page
 from kspo_ingest.tasks.pipeline.helpers import get_or_create_page, mark_dropped
+from kspo_ingest.tasks.pipeline.parallel import PublicationError, submit_postprocessing
 from kspo_ingest.tasks.pipeline.push_to_sonar import push_to_sonar
 from kspo_ingest.tasks.pipeline.refine_page import refine_page
 
@@ -83,6 +84,20 @@ async def process_board_page(
             )
             return
 
+    await submit_postprocessing(
+        ctx,
+        job_id,
+        page_id,
+        lambda: _finish_page(
+            ctx, job_id=job_id, domain_id=domain_id, page_id=page_id, url=url, cleaned=cleaned
+        ),
+    )
+
+
+async def _finish_page(
+    ctx: dict, *, job_id: int, domain_id: int, page_id: int, url: str, cleaned: dict
+):
+    session_factory = ctx["session_factory"]
     refined = await refine_page(
         ctx,
         job_id=job_id,
@@ -122,7 +137,7 @@ async def process_board_page(
     if not targets:
         return
 
-    await push_to_sonar(
+    sent = await push_to_sonar(
         ctx,
         job_id=job_id,
         page_id=page_id,
@@ -130,3 +145,5 @@ async def process_board_page(
         summary=r.get("summary"),
         keywords=r.get("keywords") or [],
     )
+    if sent == 0:
+        raise PublicationError("Sonar publication failed", counted=bool(ctx.get("sonar_client")))

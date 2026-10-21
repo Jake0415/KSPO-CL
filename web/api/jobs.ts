@@ -9,6 +9,11 @@ export type JobStatus =
   | 'CANCELLED';
 
 export type JobStats = {
+  processing_submitted?: number;
+  processing_pending?: number;
+  processing_running?: number;
+  processing_completed?: number;
+  processing_failed?: number;
   errors?: number;
   dropped?: number;
   fetched?: number;
@@ -20,6 +25,10 @@ export type JobStats = {
   unique_contents?: number;
   duplicate_urls?: number;
   pending_urls?: number;
+  current_board_url?: string;
+  current_board_page?: number;
+  collection_partial?: boolean;
+  board_outcomes?: Record<string, { reason: string; page: number; url: string; partial: boolean }>;
   repeated_lists?: number;
   termination_reason?: string;
   drop_reasons?: Record<string, number>;

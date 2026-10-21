@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import os
 import re
-from urllib.parse import urljoin, urlparse
+from html import unescape
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 from selectolax.parser import HTMLParser
 
-from kspo_ingest.attach.discovery import ATTACHMENT_EXTS, IGNORED_EXTS
+from kspo_ingest.attach.discovery import ATTACHMENT_EXTS, IGNORED_EXTS, is_attachment_url
 from kspo_ingest.crawl.url_class import is_non_content_url
 from kspo_ingest.crawl.url_normalize import canonical_url
 
@@ -62,7 +63,14 @@ def discover_internal_links(
         if parsed.netloc.lower() != host.lower():
             return
         _, ext = os.path.splitext(parsed.path or "")
-        if ext.lower() in _SKIP_EXTS:
+        if ext.lower() in _SKIP_EXTS or is_attachment_url(url):
+            return
+        if any(
+            key.lower()
+            in {"contsn", "classsn", "notice_seq", "nttid", "conseq", "con_seq", "suppbusiinfoseq"}
+            and not value.strip()
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        ):
             return
         if _is_skip_path(parsed.path):
             return
@@ -77,7 +85,7 @@ def discover_internal_links(
         href = (node.attributes.get("href") or "").strip()
         if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
             continue
-        _add(urljoin(base_url, href))
+        _add(urljoin(base_url, unescape(href)))
 
     # 2. onclick goView/fnView 패턴 — 공공 게시판 상세 페이지
     # goView('63978') → list.do를 view.do?nttId=63978 로 변환
@@ -105,7 +113,13 @@ _JS_PATH_RE = re.compile(
 def _add_js_nav_links(html: str, base_url: str, add_fn) -> None:
     """onclick/JS 문자열에서 내부 페이지 경로를 추출해 링크 후보로 추가."""
     for m in _JS_PATH_RE.finditer(html):
-        add_fn(urljoin(base_url, m.group(1)))
+        # A JS URL template immediately followed by a dynamic ID is not a page URL.
+        following = html[m.end() : m.end() + 180]
+        if re.search(r"(?:view|detail)\.(?:do|kspo)$", m.group(1), re.I) and re.search(
+            r"['\"]\?\w+=['\"]\s*\+", following
+        ):
+            continue
+        add_fn(urljoin(base_url, unescape(m.group(1))))
 
 
 # 공공 게시판 onclick 패턴 → view URL 생성
@@ -121,6 +135,15 @@ def _add_board_view_links(html: str, base_url: str, add_fn) -> None:
     parsed_base = urlparse(base_url)
     base_path = parsed_base.path
 
+    from kspo_ingest.crawl.board import _script_detail_url
+
+    resolved = set()
+    for call in re.finditer(r"[A-Za-z_]\w*\(\s*['\"](\d+)['\"]", html):
+        target = _script_detail_url(html, base_url, call.group(0), call.group(1))
+        if target:
+            resolved.add(call.group(1))
+            add_fn(target)
+
     # list.do → view.do 변환 가능한 경우만
     if "list.do" not in base_path and "List" not in base_path:
         return
@@ -134,6 +157,8 @@ def _add_board_view_links(html: str, base_url: str, add_fn) -> None:
 
     for m in _GO_VIEW_RE.finditer(html):
         ntt_id = m.group(1)
+        if ntt_id in resolved:
+            continue
         view_url = f"{parsed_base.scheme}://{parsed_base.netloc}{view_path}?nttId={ntt_id}"
         add_fn(view_url)
 

@@ -138,6 +138,8 @@ class FakePage:
         self.state += 1
 
     async def click(self, **kwargs):
+        for response in self.ajax:
+            self.handler(response)
         if self.mode == "error":
             raise ValueError()
         if self.mode == "navigation":

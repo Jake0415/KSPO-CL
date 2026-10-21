@@ -83,15 +83,19 @@ async def finish_crawl_job(s: AsyncSession, job_id: int) -> None:
     if job is None:
         return
     stats = job.stats or {}
+    # A drained crawl queue is completed even when individual pages/boards warn.
     if int(stats.get("fetched", 0)) == 0 and int(stats.get("errors", 0)) > 0:
-        await finish_job(
-            s,
-            job_id,
-            status="FAILED",
-            error="수집된 페이지 없음 — 도메인 도달 실패 또는 차단 추정",
-        )
-    else:
+        await finish_job(s, job_id, status="FAILED", error="수집된 페이지 없음 — 도메인 도달 실패 또는 차단 추정")
+    elif stats.get("termination_reason") == "queue_exhausted" and int(stats.get("pending_urls", -1)) == 0:
         await finish_job(s, job_id, status="SUCCESS")
+    elif int(stats.get("processing_failed", 0)) > 0:
+        await finish_job(s, job_id, status="FAILED", error="Page post-processing failed")
+    elif stats.get("termination_reason") == "url_limit" and int(stats.get("pending_urls", 0)) > 0:
+        await finish_job(s, job_id, status="FAILED", error="URL 한도 도달 — 미처리 URL이 남아 있음")
+    else:
+        # Board limits/fetch errors stay visible in board_outcomes, not job failures.
+        await finish_job(s, job_id, status="SUCCESS")
+
 
 
 @asynccontextmanager
@@ -159,29 +163,32 @@ async def is_cancelled(s: AsyncSession, job_id: int) -> bool:
     return row == "CANCELLED"
 
 
-async def bump_stats(s: AsyncSession, job_id: int, **delta: Any) -> None:
-    """stats JSONB 누계 갱신 — 단일 worker 가정으로 read-modify-write 사용.
+async def locked_job(s: AsyncSession, job_id: int):
+    result = await s.execute(
+        select(CrawlJob)
+        .where(CrawlJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
 
-    drop_reasons 같은 nested dict 키는 'drop_reasons__too_short=1' 형태로 받음.
-    """
-    job = await s.get(CrawlJob, job_id)
+
+async def bump_stats(s: AsyncSession, job_id: int, **delta: Any) -> None:
+    """Row-lock JSON counters so concurrent page tasks cannot lose increments."""
+    job = await locked_job(s, job_id)
     if job is None:
         return
-    stats = job.stats or empty_stats()
-
+    stats = {**(job.stats or empty_stats())}
     for key, value in delta.items():
         if "__" in key:
             outer, inner = key.split("__", 1)
-            sub = stats.setdefault(outer, {})
+            sub = dict(stats.get(outer) or {})
             sub[inner] = int(sub.get(inner, 0)) + int(value)
+            stats[outer] = sub
         else:
             stats[key] = int(stats.get(key, 0)) + int(value)
-
     job.stats = stats
-    # SQLAlchemy는 JSONB dict의 in-place mutation(+같은 객체 재할당)을 변경으로
-    # 감지하지 못해 커밋해도 저장되지 않는다. flag_modified로 명시적으로 dirty 표시.
     flag_modified(job, "stats")
-    s.add(job)
     await s.commit()
 
 

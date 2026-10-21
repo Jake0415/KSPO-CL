@@ -1,4 +1,5 @@
 """ARQ task helpers — DB upsert, storage save, page status transitions."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -23,9 +24,7 @@ async def get_or_create_page(
 ) -> Page:
     normalized, url_hash = normalize_url(url)
     existing = (
-        await s.execute(
-            select(Page).where(Page.domain_id == domain_id, Page.url_hash == url_hash)
-        )
+        await s.execute(select(Page).where(Page.domain_id == domain_id, Page.url_hash == url_hash))
     ).scalar_one_or_none()
     if existing is not None:
         changed = False
@@ -74,6 +73,7 @@ async def mark_error(s: AsyncSession, page_id: int, *, error: str) -> None:
     if page is None:
         return
     page.status = "ERROR"
+    page.storage_paths = {**(page.storage_paths or {}), "last_processing_error": error[:500]}
     page.error_count = (page.error_count or 0) + 1
     page.last_fetched_at = datetime.now(UTC)
     await s.commit()

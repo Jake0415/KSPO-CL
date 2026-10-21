@@ -58,6 +58,36 @@ def _ext_from_url(url: str) -> str | None:
     return dot_ext.lower() if dot_ext else None
 
 
+def is_attachment_url(url: str) -> bool:
+    """Identify files even when served by .down/.do/.kspo handlers."""
+    path = urlparse(url).path
+    return _ext_from_url(url) in ATTACHMENT_EXTS or bool(
+        re.fullmatch(r"/pyxis-api/\d+/digital-files/[^/]+/?", path, re.I)
+        or path.lower().endswith(".down")
+        or re.search(r"(?:download|filedown|templatedown)(?:\.(?:do|kspo))?$", path, re.I)
+    )
+
+
+def is_binary_content(raw: bytes, content_type: str | None) -> bool:
+    """Binary attachments are metadata-only, never HTML extraction input."""
+    head = raw.lstrip()[:16]
+    if head.startswith((b"%PDF-", b"PK\x03\x04", b"\x89PNG", b"GIF8", b"\xff\xd8\xff")):
+        return True
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    return mime.startswith(("image/", "audio/", "video/")) or (
+        mime.startswith(
+            (
+                "application/pdf",
+                "application/zip",
+                "application/x-msdownload",
+                "application/msword",
+                "application/vnd.",
+            )
+        )
+        or (mime == "application/octet-stream" and not head.startswith(b"<"))
+    )
+
+
 def _file_name_from(url: str, link_text: str) -> str:
     """파일명 추정 우선순위: URL query(file_name=) → URL path basename → 링크 텍스트."""
     parsed = urlparse(url)
@@ -99,7 +129,7 @@ def discover_attachments(html: str, *, base_url: str) -> list[DiscoveredAttachme
     out: list[DiscoveredAttachment] = []
     for node in tree.css("a[href], a[onclick]"):
         href = (node.attributes.get("href") or "").strip()
-        js = node.attributes.get("onclick", "") + " " + href
+        js = (node.attributes.get("onclick") or "") + " " + href
         match = re.search(
             r"fn_fileDownLoad\(\s*[\"\']([^\"\']+)[\"\']\s*,\s*[\"\']([^\"\']+)[\"\']", js
         )
@@ -111,11 +141,13 @@ def discover_attachments(html: str, *, base_url: str) -> list[DiscoveredAttachme
             continue
         absolute = urljoin(base_url, href)
         ext = _ext_from_url(absolute)
-        if ext is None:
-            continue
+        if ext is None or ext not in ATTACHMENT_EXTS:
+            if not is_attachment_url(absolute):
+                continue
+            ext = ".bin"
         if ext in IGNORED_EXTS and ext not in IMAGE_EXTS:
             continue
-        if ext not in ATTACHMENT_EXTS:
+        if ext not in ATTACHMENT_EXTS and ext != ".bin":
             continue
         if absolute in seen:
             continue

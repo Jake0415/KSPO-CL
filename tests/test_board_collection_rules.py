@@ -67,6 +67,7 @@ async def test_existing_page_does_not_stop_next_page_and_date_boundary(monkeypat
     )
     monkeypatch.setattr(module, "start_job", AsyncMock())
     monkeypatch.setattr(module, "finish_job", finish)
+    monkeypatch.setattr(module, "finish_crawl_job", finish)
     monkeypatch.setattr(module, "is_cancelled", AsyncMock(return_value=False))
     await module._run_board_refresh_impl(
         {
@@ -165,7 +166,7 @@ async def test_full_resets_site_board_sources_and_data_before_rediscovery(monkey
                 events.append(
                     "reset_boards" if statement.table.name == "board_source" else "reset_pages"
                 )
-            return SimpleNamespace(all=lambda: [])
+            return SimpleNamespace(all=lambda: [], scalar_one_or_none=lambda: job)
 
         async def commit(self):
             pass
@@ -185,6 +186,7 @@ async def test_full_resets_site_board_sources_and_data_before_rediscovery(monkey
     monkeypatch.setattr(module, "start_job", AsyncMock())
     monkeypatch.setattr(module, "finish_job", AsyncMock())
     monkeypatch.setattr(module, "is_cancelled", AsyncMock(return_value=False))
+    monkeypatch.setattr("kspo_ingest.crawl.start_url.preflight_start", AsyncMock())
     monkeypatch.setattr(module, "discover_sitemap_urls", AsyncMock(return_value=[]))
     monkeypatch.setattr(module, "fetch_page", fetch)
     monkeypatch.setattr(board, "_run_board_refresh_impl", collect)

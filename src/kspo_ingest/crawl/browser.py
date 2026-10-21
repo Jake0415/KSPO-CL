@@ -82,6 +82,7 @@ class BrowserFetcher:
         proxy: str | None = None,
         headless: bool = True,
         dynamic_max_actions: int = 100,
+        dynamic_timeout_seconds: float = 30.0,
         readiness_policy: ReadinessPolicy | None = None,
     ) -> None:
         self._host_configs = {**DEFAULT_HOST_CONFIGS, **(host_configs or {})}
@@ -92,6 +93,9 @@ class BrowserFetcher:
         if dynamic_max_actions < 1:
             raise ValueError("dynamic_max_actions must be positive")
         self._dynamic_max_actions = dynamic_max_actions
+        if dynamic_timeout_seconds <= 0:
+            raise ValueError("dynamic_timeout_seconds must be positive")
+        self._dynamic_timeout_seconds = dynamic_timeout_seconds
         self._readiness_policy = readiness_policy or ReadinessPolicy()
         self._pw: Any = None
         self._browser: Browser | None = None
@@ -179,6 +183,13 @@ class BrowserFetcher:
     ) -> FetchResult:
         page = await session.ctx.new_page()
         await apply_stealth(page, session.profile)
+        initial_responses = []
+
+        def remember_response(response):
+            if response.request.resource_type in ("xhr", "fetch") and len(initial_responses) < 200:
+                initial_responses.append(response)
+
+        page.on("response", remember_response)
         try:
             resp = await self._goto_ready(page, url, session.config)
             resp = await self._follow_entry_gate(page, url, session.config, resp)
@@ -198,6 +209,8 @@ class BrowserFetcher:
                 content, discovery_report = await expand_readonly(
                     page,
                     max_actions=self._dynamic_max_actions,
+                    max_elapsed_seconds=self._dynamic_timeout_seconds,
+                    initial_responses=initial_responses,
                     navigation_cache=self._navigation_cache,
                     readiness_policy=session.config.readiness_policy or self._readiness_policy,
                 )
@@ -228,6 +241,7 @@ class BrowserFetcher:
                 discovery_report=discovery_report,
             )
         finally:
+            page.remove_listener("response", remember_response)
             await page.close()
 
     async def _follow_entry_gate(self, page, requested_url, config, response):
@@ -282,6 +296,7 @@ class BrowserFetcher:
             content, discovery_report = await expand_readonly(
                 page,
                 max_actions=self._dynamic_max_actions,
+                max_elapsed_seconds=self._dynamic_timeout_seconds,
                 capture_initial=False,
                 navigation_cache=self._navigation_cache,
                 readiness_policy=session.config.readiness_policy or self._readiness_policy,
