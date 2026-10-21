@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     crawl_render_all_html: bool = True
     crawl_dynamic_timeout_seconds: float = Field(default=30.0, gt=0)
     crawl_dynamic_max_actions: int = 100
-    crawl_initial_ready_timeout_ms: int = 15000
+    crawl_initial_ready_timeout_ms: int = 8000
+    job_timeout_seconds: int = Field(default=43200, gt=0)
     crawl_action_ready_timeout_ms: int = 5000
     crawl_content_stable_ms: int = 800
 

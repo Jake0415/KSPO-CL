@@ -292,7 +292,7 @@ class WorkerSettings:
     max_tries = 5
     # 대형 도메인 full 크롤(수백~수천 페이지 × LLM 정제+임베딩)은 1시간을 초과한다.
     # 초과 시 ARQ가 CancelledError로 잡을 죽이고 job_guard가 FAILED 처리하지만,
-    # 크롤이 중간에 잘리므로 넉넉히 상향(6시간). 필요 시 settings로 조정.
-    job_timeout = getattr(settings, "job_timeout_seconds", None) or 21600  # 6h
+    # 크롤이 중간에 잘리므로 넉넉히 상향(12시간). 필요 시 settings로 조정.
+    job_timeout = settings.job_timeout_seconds  # default: 12h
     on_startup = on_startup
     on_shutdown = on_shutdown

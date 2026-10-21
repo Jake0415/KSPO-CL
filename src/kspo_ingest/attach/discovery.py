@@ -58,13 +58,27 @@ def _ext_from_url(url: str) -> str | None:
     return dot_ext.lower() if dot_ext else None
 
 
+def is_image_handler_url(url: str) -> bool:
+    """Image response handlers, not HTML image gallery/detail pages.
+
+    Match complete route basenames; noImgNm is only a fallback filename and
+    must not determine the type of the actual attachment.
+    """
+    path = unquote(urlparse(url).path)
+    return bool(re.search(r"/(?:getImage|imageDownload|imageDown)\.(?:do|kspo)$", path, re.I))
+
+
 def is_attachment_url(url: str) -> bool:
     """Identify files even when served by .down/.do/.kspo handlers."""
     path = urlparse(url).path
-    return _ext_from_url(url) in ATTACHMENT_EXTS or bool(
-        re.fullmatch(r"/pyxis-api/\d+/digital-files/[^/]+/?", path, re.I)
-        or path.lower().endswith(".down")
-        or re.search(r"(?:download|filedown|templatedown)(?:\.(?:do|kspo))?$", path, re.I)
+    return (
+        is_image_handler_url(url)
+        or _ext_from_url(url) in ATTACHMENT_EXTS
+        or bool(
+            re.fullmatch(r"/pyxis-api/\d+/digital-files/[^/]+/?", path, re.I)
+            or path.lower().endswith(".down")
+            or re.search(r"(?:download|filedown|templatedown)(?:\.(?:do|kspo))?$", path, re.I)
+        )
     )
 
 
@@ -159,7 +173,7 @@ def discover_attachments(html: str, *, base_url: str) -> list[DiscoveredAttachme
                 source_url=absolute,
                 file_name=_file_name_from(absolute, link_text),
                 ext=ext,
-                mime_type=mime_for_ext(ext),
+                mime_type="image/*" if is_image_handler_url(absolute) else mime_for_ext(ext),
             )
         )
     # Inline body images: metadata only. Exclude global navigation and decorative chrome.
@@ -171,8 +185,13 @@ def discover_attachments(html: str, *, base_url: str) -> list[DiscoveredAttachme
             continue
         absolute = urljoin(base_url, node.attributes.get("src", ""))
         ext = _ext_from_url(absolute)
-        if urlparse(absolute).scheme not in {"http", "https"} or ext not in IMAGE_EXTS:
+        if urlparse(absolute).scheme not in {"http", "https"}:
             continue
+        image_handler = is_image_handler_url(absolute)
+        if ext not in IMAGE_EXTS and not image_handler:
+            continue
+        if image_handler:
+            ext = ".bin"
         if absolute in seen:
             continue
         seen.add(absolute)
@@ -181,7 +200,7 @@ def discover_attachments(html: str, *, base_url: str) -> list[DiscoveredAttachme
                 absolute,
                 _file_name_from(absolute, node.attributes.get("alt", "")),
                 ext,
-                mime_for_ext(ext),
+                "image/*" if image_handler else mime_for_ext(ext),
             )
         )
     return out

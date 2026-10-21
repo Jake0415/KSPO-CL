@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 @dataclass(frozen=True)
 class ReadinessPolicy:
-    initial_timeout_ms: int = 15000
+    initial_timeout_ms: int = 8000
     action_timeout_ms: int = 5000
     stable_ms: int = 800
     poll_ms: int = 150
@@ -158,3 +158,26 @@ async def wait_initial_content(page, policy: ReadinessPolicy | None = None) -> d
         return await waiter.wait(initial=True)
     finally:
         waiter.close()
+
+
+async def read_page_content(page, *, timeout_ms: int = 8000) -> str:
+    """Retry only transient navigation races, within a fixed deadline.
+
+    Never reuse HTML from a different URL; unrelated browser failures propagate.
+    """
+    async with asyncio.timeout(timeout_ms / 1000):
+        while True:
+            try:
+                return await page.content()
+            except Exception as exc:
+                message = str(exc).lower()
+                if not any(
+                    marker in message
+                    for marker in (
+                        "page is navigating",
+                        "execution context was destroyed",
+                        "cannot find context with specified id",
+                    )
+                ):
+                    raise
+                await asyncio.sleep(0.15)

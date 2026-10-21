@@ -22,6 +22,19 @@ _NOISE_TAGS = ("script", "style", "noscript", "template")
 def _strip_noise_tags(html: str) -> str:
     tree = HTMLParser(html, detect_encoding=False, use_meta_tags=False)
     tree.strip_tags(list(_NOISE_TAGS))
+    # Source-provided image descriptions are text facts, not OCR or inference.
+    # Ignore short decorative labels and global page chrome.
+    for image in tree.css("img[alt]"):
+        alt = (image.attributes.get("alt") or "").strip()
+        parent = image.parent
+        in_chrome = False
+        while parent is not None:
+            if parent.tag in {"header", "nav", "footer"}:
+                in_chrome = True
+                break
+            parent = parent.parent
+        if len(alt) >= 10 and not in_chrome:
+            image.replace_with(alt)
     return tree.html or html
 
 

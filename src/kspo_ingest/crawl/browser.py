@@ -23,7 +23,12 @@ from playwright.async_api import TimeoutError as BrowserTimeoutError
 
 from kspo_ingest.crawl.dynamic import expand_readonly
 from kspo_ingest.crawl.fetcher import FetchResult
-from kspo_ingest.crawl.readiness import ContentWaiter, ReadinessPolicy, wait_initial_content
+from kspo_ingest.crawl.readiness import (
+    ContentWaiter,
+    ReadinessPolicy,
+    read_page_content,
+    wait_initial_content,
+)
 from kspo_ingest.crawl.stealth import StealthProfile, apply_stealth, get_profile
 from kspo_ingest.observability.logger import get_logger
 
@@ -215,7 +220,7 @@ class BrowserFetcher:
                     readiness_policy=session.config.readiness_policy or self._readiness_policy,
                 )
             else:
-                content = await page.content()
+                content = await read_page_content(page)
                 discovery_report = {
                     "mode": "preflight" if not explore else "http_error",
                     "clicked": 0,
@@ -302,7 +307,7 @@ class BrowserFetcher:
                 readiness_policy=session.config.readiness_policy or self._readiness_policy,
             )
         else:
-            content = await page.content()
+            content = await read_page_content(page)
             discovery_report = {"mode": "preflight", "clicked": 0}
         raw_bytes = content.encode("utf-8")
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -340,7 +345,7 @@ class BrowserFetcher:
 
         try:
             await self._goto_ready(page, url, HostBrowserConfig())
-            html = await page.content()
+            html = await read_page_content(page)
             title = await page.title()
 
             # 인터랙션 가능한 요소 추출

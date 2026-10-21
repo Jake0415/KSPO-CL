@@ -11,7 +11,12 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 
 from selectolax.parser import HTMLParser
 
-from kspo_ingest.crawl.readiness import ContentReadinessError, ContentWaiter, ReadinessPolicy
+from kspo_ingest.crawl.readiness import (
+    ContentReadinessError,
+    ContentWaiter,
+    ReadinessPolicy,
+    read_page_content,
+)
 
 _READ_LABEL = re.compile(
     r"더\s*보기|펼치|확장|상세|다음|조회|메뉴|\+|more|expand|next|details", re.I
@@ -253,7 +258,7 @@ async def expand_readonly(
 ) -> tuple[str, dict]:
     host = urlsplit(page.url).hostname
     original_url = page.url
-    initial = await page.content()
+    initial = await read_page_content(page)
     baseline = snapshot_content(initial)
     observations: list[str] = []
     observed: set[str] = {baseline}
@@ -331,10 +336,10 @@ async def expand_readonly(
                 # Listener is now attached: capture AJAX fired on initial page load too.
                 await page.reload(wait_until="domcontentloaded", timeout=15000)
                 report["initial_readiness"] = await waiter.wait(initial=True)
-                initial = await page.content()
+                initial = await read_page_content(page)
             for _ in range(max_actions):
                 try:
-                    current = await page.content()
+                    current = await read_page_content(page)
                 except Exception as exc:
                     report["failures"].append("content:" + type(exc).__name__)
                     report["stop_reason"] = "navigation_in_progress"
@@ -398,7 +403,7 @@ async def expand_readonly(
                         tried.add(key)
                         report.setdefault("navigations", []).append(str(candidate["label"]))
                         continue
-                    revealed_html = await page.content()
+                    revealed_html = await read_page_content(page)
                     for anchor in HTMLParser(revealed_html).css("a[href]"):
                         target = urljoin(original_url, (anchor.attributes.get("href") or ""))
                         if (
@@ -480,6 +485,12 @@ async def expand_readonly(
         # Preserve initial DOM and every block already captured; report incomplete expansion.
         report["stop_reason"] = "dynamic_time_limit"
         report["limit_reached"] = True
+    except Exception as exc:
+        # The initial source DOM is already available; expansion failure must
+        # not discard it. Cancellation (BaseException) still propagates.
+        report["stop_reason"] = "dynamic_error"
+        report["limit_reached"] = True
+        report["failures"].append("expansion:" + type(exc).__name__)
     finally:
         waiter.close()
         page.remove_listener("response", on_response)
