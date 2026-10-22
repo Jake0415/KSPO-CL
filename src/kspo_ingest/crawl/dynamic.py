@@ -17,6 +17,7 @@ from kspo_ingest.crawl.readiness import (
     ReadinessPolicy,
     read_page_content,
 )
+from kspo_ingest.crawl.spa import effective_parts, is_spa_url
 
 _READ_LABEL = re.compile(
     r"더\s*보기|펼치|확장|상세|다음|조회|메뉴|\+|more|expand|next|details", re.I
@@ -80,6 +81,8 @@ def interaction_candidates(html: str) -> list[dict[str, str | bool]]:
     )
     for index, node in enumerate(nodes):
         attrs = node.attributes
+        if node.tag == "a" and is_spa_url(attrs.get("href") or ""):
+            continue
         if _requires_user_search(node, tree):
             continue
         label = (attrs.get("aria-label") or attrs.get("title") or node.text(strip=True))[:160]
@@ -188,7 +191,7 @@ def has_dynamic_controls(html: str) -> bool:
 
 
 def navigation_depth(source: str, target: str, depth: int) -> int:
-    a, b = urlsplit(source), urlsplit(target)
+    a, b = effective_parts(source), effective_parts(target)
     if (a.hostname, a.path) == (b.hostname, b.path):
         pa, pb = (
             parse_qs(a.query, keep_blank_values=True),
@@ -293,12 +296,16 @@ async def expand_readonly(
         await route.continue_()
 
     async def capture(response):
+        if page.url != original_url:
+            return
         if urlsplit(response.url).hostname != host or response.status != 200:
             return
         if response.request.resource_type not in ("xhr", "fetch"):
             return
         try:
             raw = await response.body()
+            if page.url != original_url:
+                return
             if len(raw) > 1024 * 1024:
                 report["failures"].append("ajax_too_large")
                 return

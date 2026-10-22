@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl
 
 from kspo_ingest.crawl.board_identity import board_key, is_detail_url
+from kspo_ingest.crawl.spa import effective_parts
 from kspo_ingest.crawl.url_normalize import canonical_url
 
 
@@ -28,15 +29,18 @@ def list_signature(source: str, urls: list[str]) -> str | None:
             if list_family(u) is None
             and (
                 is_detail_url(u)
-                or re.search(r"/(?:display|colect|product|notice|class)/\d+", urlsplit(u).path)
-                or re.search(r"(?:view|detail)", urlsplit(u).path, re.I)
+                or re.search(
+                    r"/(?:display|colect|product|notice|class)/\d+", effective_parts(u).path
+                )
+                or re.search(r"(?:view|detail)", effective_parts(u).path, re.I)
                 or (
-                    urlsplit(u).path.rsplit("/", 1)[0] == urlsplit(source).path.rsplit("/", 1)[0]
-                    and urlsplit(u).path.rsplit("/", 1)[-1].isdigit()
+                    effective_parts(u).path.rsplit("/", 1)[0]
+                    == effective_parts(source).path.rsplit("/", 1)[0]
+                    and effective_parts(u).path.rsplit("/", 1)[-1].isdigit()
                 )
                 or any(
                     k.lower() in {"nttid", "conseq", "con_seq", "articleid"}
-                    for k, _ in parse_qsl(urlsplit(u).query)
+                    for k, _ in parse_qsl(effective_parts(u).query)
                 )
             )
         }

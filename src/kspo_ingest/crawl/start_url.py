@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit, urlunsplit
 
+from kspo_ingest.crawl.spa import is_spa_url, route_fragment
+
 
 def parse_start_url(raw: str) -> str:
     text = raw.strip()
@@ -14,7 +16,7 @@ def parse_start_url(raw: str) -> str:
         raise ValueError("Invalid HTTP(S) start URL")
     if p.port not in (None, 80, 443):
         raise ValueError("Unsupported start URL port")
-    return urlunsplit((p.scheme, p.netloc.lower(), p.path or "/", p.query, ""))
+    return urlunsplit((p.scheme, p.netloc.lower(), p.path or "/", p.query, route_fragment(text)))
 
 
 def entry_urls(domain, job=None) -> list[str]:
@@ -31,8 +33,10 @@ def entry_urls(domain, job=None) -> list[str]:
     return result
 
 
-def browser_required(domain) -> bool:
-    return bool(domain.use_playwright or domain.host == "nfa.kspo.or.kr")
+def browser_required(domain, url: str | None = None) -> bool:
+    return bool(
+        domain.use_playwright or domain.host == "nfa.kspo.or.kr" or (url and is_spa_url(url))
+    )
 
 
 async def preflight_start(ctx, domain, urls):
@@ -56,10 +60,12 @@ async def preflight_start(ctx, domain, urls):
             result = await smart.fetch_preflight(url, user_agent=domain.user_agent)
         elif smart:
             result = await smart.fetch(
-                url, user_agent=domain.user_agent, force_browser=browser_required(domain)
+                url, user_agent=domain.user_agent, force_browser=browser_required(domain, url)
             )
         else:
-            fetcher = ctx.get("playwright_fetcher") if browser_required(domain) else ctx["fetcher"]
+            fetcher = (
+                ctx.get("playwright_fetcher") if browser_required(domain, url) else ctx["fetcher"]
+            )
             if fetcher is None:
                 raise RuntimeError("Browser fetcher unavailable")
             result = await fetcher.fetch(url, user_agent=domain.user_agent)

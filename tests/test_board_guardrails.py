@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from kspo_ingest.crawl.board_identity import board_key, is_board_owned_link
 
+from kspo_ingest.crawl.board_identity import board_key, is_board_owned_link
 from kspo_ingest.crawl.board_validation import entry_url
 from kspo_ingest.crawl.loop_guard import list_family, list_signature
 from kspo_ingest.crawl.url_normalize import normalize_url
@@ -43,10 +43,11 @@ def test_detail_cannot_be_registered_as_list():
 
 def test_card_layout_notice_icon_is_recognized():
     from kspo_ingest.crawl.board import extract_board_items
-    html = '''<ul><li class="list_li"><a href="/board.es?act=view&list_no=1">
+
+    html = """<ul><li class="list_li"><a href="/board.es?act=view&list_no=1">
       <strong><i class="icon_notice">Notice</i>title</strong>
-      <span class="date">2026-10-07</span></a></li></ul>'''
-    items = extract_board_items(html, base_url='https://x.kr/board.es')
+      <span class="date">2026-10-07</span></a></li></ul>"""
+    items = extract_board_items(html, base_url="https://x.kr/board.es")
     assert len(items) == 1
     assert items[0].is_notice
 
@@ -140,6 +141,7 @@ async def test_db_insert_is_bounded_before_queueing():
     "scenario,reason,partial",
     [
         ("page_cap", "page_limit", True),
+        ("empty", "empty_list", False),
         ("article_cap", "article_limit", True),
         ("repeated", "repeated_list", False),
         ("time_cap", "time_limit", True),
@@ -180,11 +182,21 @@ async def test_board_exit_records_reason_and_partial(monkeypatch, scenario, reas
     async def fetch(url, **kwargs):
         if scenario == "time_cap":
             await asyncio.sleep(0.05)
+        if scenario == "empty":
+            return SimpleNamespace(
+                http_status=200,
+                raw_bytes=(
+                    b'<main><p>No records</p><li><a href="javascript:void(0)" '
+                    b'onclick="fnSearch(1)">1</a></li></main>'
+                ),
+                content_type="text/html",
+            )
         page = int(parse_qs(urlsplit(url).query)["pageIndex"][0])
         number = 1 if scenario == "repeated" else page
         date = "2020-01-01" if scenario == "date" else datetime.now(UTC).strftime("%Y-%m-%d")
         html = "".join(
-            f'<tr><td><a href="/board.es?bid=1&act=view&list_no={number * 10 + n}&nPage={page}">a</a></td><td class="date">{date}</td></tr>'
+            f'<tr><td><a href="/board.es?bid=1&act=view&list_no={number * 10 + n}'
+            f'&nPage={page}">a</a></td><td class="date">{date}</td></tr>'
             for n in range(2)
         )
         return SimpleNamespace(

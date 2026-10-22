@@ -25,7 +25,8 @@ const JOB_TYPE_LABEL: Record<string, string> = {
 };
 
 const BOARD_EXIT_LABEL: Record<string, string> = {
-  page_limit: '목록 페이지 한도 도달', time_limit: '탐색 시간 한도 도달',
+  page_limit: '목록 페이지 한도 도달', time_limit: '개별 게시판 처리 시간 한도 도달',
+  total_time_limit: '게시판 전체 처리 시간 예산 소진',
   article_limit: '게시글 수 한도 도달', url_limit: '전체 URL 한도 도달',
   no_progress: '새 게시글이 없는 목록 반복', fetch_error: '목록 요청 오류',
   http_error: '목록 응답 오류', parse_error: '목록 분석 오류',
@@ -113,11 +114,22 @@ export default function JobDetailPage() {
           <CardBody>
             <StatsGrid stats={data.stats} />
             {data.stats?.collection_partial && (
-              <p className="mt-3 text-sm text-danger">부분 수집: 게시판 한도 또는 오류로 중단된 구간이 있습니다.</p>
+              <p className="mt-3 text-sm text-danger">부분 수집: 게시판 처리 한도·오류 또는 시간 예산 소진으로 미완료 구간이 있습니다.</p>
+            )}
+            {Object.keys(data.stats?.board_deferred ?? {}).length > 0 && (
+              <div className="mt-3 text-sm" role="status">
+                <p>게시판 처리 대기 {Object.keys(data.stats?.board_deferred ?? {}).length}곳: 전체 처리 시간 예산을 소진했습니다. 개별 게시판 접속 오류가 아니며, 다음 게시판 갱신에서 다시 확인합니다.</p>
+                <details className="mt-2">
+                  <summary className="cursor-pointer">대기 게시판 보기</summary>
+                  {Object.entries(data.stats?.board_deferred ?? {}).map(([id, result]) => (
+                    <p key={id} className="mt-1 break-all">게시판 #{id}: <a href={result.url} target="_blank" rel="noreferrer" className="underline">{result.url}</a></p>
+                  ))}
+                </details>
+              </div>
             )}
             {Object.entries(data.stats?.board_outcomes ?? {}).filter(([, result]) => result.partial).map(([id, result]) => (
               <p className="mt-2 text-sm break-all" key={id}>
-                게시판 #{id}: {BOARD_EXIT_LABEL[result.reason] ?? '탐색 중단'}, {result.page}페이지 · {' '}
+                게시판 #{id}: {BOARD_EXIT_LABEL[result.reason] ?? '탐색 중단'}, {result.page > 0 ? `${result.page}페이지` : '목록 검증 단계'} · {' '}
                 <a className="underline" href={result.url} target="_blank" rel="noreferrer">중단 위치 보기</a>
               </p>
             ))}

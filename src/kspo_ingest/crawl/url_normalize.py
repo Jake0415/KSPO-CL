@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from kspo_ingest.crawl.board_identity import ARTICLE_IDS, BOARD_IDS, CURSORS, query_pairs
+from kspo_ingest.crawl.spa import effective_parts, route_fragment
 
 # 트래킹·분석 파라미터 — 정규화 시 제거
 TRACKING_PARAMS: frozenset[str] = frozenset(
@@ -57,11 +58,15 @@ def _identity_qs(path: str, qs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """콘텐츠 정체성 파라미터만 남긴다 — 내비/검색 노이즈(searchWrd/searchCnd,
     조건부 menuNo) + 상세 페이지의 pageIndex 제거. url_hash와 canonical_url이 공유하는
     단일 규칙(둘의 정체성 정의가 어긋나지 않도록)."""
-    esafer_detail = path.endswith('/board.es') and any(
-        k == 'list_no' and v for k, v in qs
-    ) and ('act', 'view') in qs
-    is_detail = path.endswith(_DETAIL_PATH_SUFFIX) or esafer_detail or any(
-        k.lower() in ARTICLE_IDS and v for k, v in qs
+    esafer_detail = (
+        path.endswith("/board.es")
+        and any(k == "list_no" and v for k, v in qs)
+        and ("act", "view") in qs
+    )
+    is_detail = (
+        path.endswith(_DETAIL_PATH_SUFFIX)
+        or esafer_detail
+        or any(k.lower() in ARTICLE_IDS and v for k, v in qs)
     )
     # menuNo is noise when the content is identified by something else: an
     # nttId/bbsId in the query, or a board page whose identity is the board code
@@ -99,14 +104,30 @@ def _identity_qs(path: str, qs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return [
         (k, v)
         for (k, v) in qs
-        if not _is_noise(k) and not (has_detail_identity and k.lower() in navigation)
-        and not (k.lower() == "topmenuseq" and any(
-            name.lower() in BOARD_IDS for name, _ in qs
-        ))
+        if not _is_noise(k)
+        and not (has_detail_identity and k.lower() in navigation)
+        and not (k.lower() == "topmenuseq" and any(name.lower() in BOARD_IDS for name, _ in qs))
     ]
 
 
-def _identity_hash(scheme: str, netloc: str, path: str, qs: list[tuple[str, str]]) -> str:
+def _normalized_fragment(raw: str, *, identity: bool) -> str:
+    fragment = route_fragment(raw)
+    if not fragment:
+        return ""
+    route = effective_parts(raw)
+    path = re.sub(r"/+", "/", route.path or "/")
+    pairs = [(k, v) for k, v in query_pairs(route.query) if k not in TRACKING_PARAMS]
+    if identity:
+        pairs = _identity_qs(path, pairs)
+        if re.search(r"/(?:notice|news|article|post)/[0-9]+/?$", path, re.I):
+            pairs = [(k, v) for k, v in pairs if k.lower() not in CURSORS | {"max"}]
+    prefix = "!" if fragment.startswith("!") else ""
+    return prefix + urlunsplit(("", "", path, urlencode(sorted(pairs)), ""))
+
+
+def _identity_hash(
+    scheme: str, netloc: str, path: str, qs: list[tuple[str, str]], fragment: str = ""
+) -> str:
     """콘텐츠 정체성 기준 url_hash. normalized(fetch URL)는 건드리지 않는다.
 
     scheme(http/https)은 정체성에서 제외한다 — 동일 페이지의 http/https 변형이
@@ -114,7 +135,7 @@ def _identity_hash(scheme: str, netloc: str, path: str, qs: list[tuple[str, str]
     scheme 쌍둥이)을 근절한다. normalized(fetch URL)의 scheme은 원형 유지한다.
     """
     ident = _identity_qs(path, qs)
-    ident_url = urlunsplit(("", netloc, path, urlencode(ident), ""))
+    ident_url = urlunsplit(("", netloc, path, urlencode(ident), fragment))
     return hashlib.sha1(ident_url.encode("utf-8")).hexdigest()
 
 
@@ -133,19 +154,17 @@ def canonical_url(raw: str) -> str:
         if port == _DEFAULT_PORTS.get(scheme):
             netloc = host
     path = re.sub(r"/+", "/", parts.path or "/")
-    qs = [
-        (k, v)
-        for (k, v) in query_pairs(parts.query)
-        if k not in TRACKING_PARAMS
-    ]
+    qs = [(k, v) for (k, v) in query_pairs(parts.query) if k not in TRACKING_PARAMS]
     ident = sorted(_identity_qs(path, qs), key=lambda kv: kv[0])
-    return urlunsplit((scheme, netloc, path, urlencode(ident), ""))
+    return urlunsplit(
+        (scheme, netloc, path, urlencode(ident), _normalized_fragment(raw, identity=True))
+    )
 
 
 def normalize_url(raw: str) -> tuple[str, str]:
     """returns (normalized_url, sha1_hash).
 
-    1) scheme/host 소문자, 기본 포트(80/443) 제거, fragment 제거
+    1) scheme/host 소문자, 기본 포트(80/443) 제거, 일반 앵커 제거(SPA 경로 보존)
     2) 경로 비면 '/' 추가 (외엔 trailing slash 보존)
     3) 쿼리: 알파벳 정렬 + TRACKING_PARAMS 제거 (PRESERVE_PARAMS는 항상 유지)
     4) 중복 슬래시 정규화
@@ -174,7 +193,9 @@ def normalize_url(raw: str) -> tuple[str, str]:
     qs.sort(key=lambda kv: kv[0])
     new_query = urlencode(qs)
 
-    # fragment 제거
-    normalized = urlunsplit((scheme, netloc, path, new_query, ""))
-    url_hash = _identity_hash(scheme, netloc, path, qs)
+    # Router fragments are page identities; plain document anchors are discarded.
+    normalized = urlunsplit(
+        (scheme, netloc, path, new_query, _normalized_fragment(raw, identity=False))
+    )
+    url_hash = _identity_hash(scheme, netloc, path, qs, _normalized_fragment(raw, identity=True))
     return normalized, url_hash

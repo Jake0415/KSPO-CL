@@ -9,18 +9,18 @@ import asyncio
 from datetime import UTC, datetime
 from time import monotonic
 
-from selectolax.parser import HTMLParser
 from sqlalchemy import select
 
 from kspo_ingest.clean.encoding import detect_encoding
 from kspo_ingest.crawl.board import (
     build_page_url,
+    empty_board_reason,
     extract_board_items,
     is_old_board_page,
     is_within_freshness,
+    next_board_page_url,
     page_param_for_host,
 )
-from kspo_ingest.crawl.board_identity import is_detail_url
 from kspo_ingest.crawl.url_normalize import normalize_url
 from kspo_ingest.db.models import BoardSource, Domain, Page
 from kspo_ingest.observability.logger import get_logger
@@ -45,6 +45,7 @@ async def _record_board_outcome(ctx, job_id, source_id, reason, page_no, list_ur
     partial = reason in {
         "page_limit",
         "time_limit",
+        "total_time_limit",
         "article_limit",
         "url_limit",
         "no_progress",
@@ -66,13 +67,41 @@ async def _record_board_outcome(ctx, job_id, source_id, reason, page_no, list_ur
             }
             stats.update(
                 board_outcomes=outcomes,
-                collection_partial=any(v["partial"] for v in outcomes.values()),
+                collection_partial=any(v["partial"] for v in outcomes.values())
+                or bool(stats.get("board_deferred")),
             )
             job.stats = stats
             from sqlalchemy.orm.attributes import flag_modified
 
             flag_modified(job, "stats")
             await s.commit()
+
+
+async def _record_deferred_boards(ctx, job_id, sources, done, budget):
+    """Unvisited sources are deferred, not fabricated per-source timeout errors."""
+    pending = {
+        str(src.id): {"url": src.list_url, "reason": "total_budget_deferred"}
+        for src in sources
+        if src.id not in done
+    }
+    if not pending:
+        return
+    async with ctx["session_factory"]() as session:
+        job = await locked_job(session, job_id)
+        if job is None:
+            return
+        stats = dict(job.stats or {})
+        stats.update(
+            board_deferred=pending,
+            board_budget_exhausted=True,
+            board_active_seconds=round(budget["used"], 3),
+            collection_partial=True,
+        )
+        job.stats = stats
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(job, "stats")
+        await session.commit()
 
 
 async def run_board_refresh(
@@ -113,6 +142,10 @@ async def _run_board_refresh_impl(
     now = datetime.now(UTC)
     eff_freshness = freshness_days or settings.board_freshness_days
     eff_max_pages = min(max_pages or settings.board_max_pages, MAX_BOARD_PAGES)
+    # The mutable ledger survives nested ctx copies and repeated full-crawl calls.
+    # Only time inside board processing counts; ordinary BFS time does not.
+    budget = ctx.setdefault("board_time_budgets", {}).setdefault(job_id, {"used": 0.0})
+    done = ctx.setdefault("full_board_sources_done", set()) if not manage_job else set()
     if "frontier" in ctx and "full_url_limit" not in ctx:
         ctx = {**ctx, "full_url_limit": 30000}
 
@@ -137,9 +170,13 @@ async def _run_board_refresh_impl(
         srcs = list(
             (
                 await s.execute(
-                    select(BoardSource).where(
+                    select(BoardSource)
+                    .where(
                         BoardSource.domain_id == domain_id,
                         BoardSource.status.in_(("confirmed", "candidate")),
+                    )
+                    .order_by(
+                        BoardSource.last_refreshed_at.asc().nulls_first(), BoardSource.id.asc()
                     )
                 )
             )
@@ -148,22 +185,22 @@ async def _run_board_refresh_impl(
         )
 
     for src in srcs:
+        if src.id in done:
+            continue
+        remaining = settings.board_total_max_seconds - budget["used"]
+        if remaining <= 0:
+            break
         reason = "page_limit"
         started = monotonic()
-        deadline = min(
-            started + settings.board_max_seconds,
-            ctx.setdefault("board_deadline", started + settings.board_total_max_seconds),
-        )
+        total_limited = remaining <= settings.board_max_seconds
+        timeout_reason = "total_time_limit" if total_limited else "time_limit"
+        deadline = started + min(settings.board_max_seconds, remaining)
         article_count = 0
         seen_articles = set()
         stagnant_pages = 0
-        page_no = 1
+        page_no = 0  # Validation has not reached the first list page yet.
         list_url = src.list_url
-        done = ctx.get("full_board_sources_done")
-        if done is not None:
-            if src.id in done:
-                continue
-            done.add(src.id)
+        done.add(src.id)
         try:
             from kspo_ingest.crawl.board_detect import revalidate_source
             from kspo_ingest.crawl.board_validation import entry_url
@@ -192,16 +229,19 @@ async def _run_board_refresh_impl(
             old_pages = 0
             chronological = bool(src.newest_first)
             previous_date = None
+            next_list_url = None
             while page_no <= eff_max_pages:
                 if monotonic() >= deadline:
-                    reason = "time_limit"
+                    reason = timeout_reason
                     break
                 async with session_factory() as s:
                     if await is_cancelled(s, job_id):
                         async with session_factory() as s2:
                             await finish_job(s2, job_id, status="CANCELLED")
                         return
-                list_url = build_page_url(src.list_url, page_no, param=board_page_param)
+                list_url = next_list_url or build_page_url(
+                    src.list_url, page_no, param=board_page_param
+                )
                 from kspo_ingest.tasks.pipeline.enqueue_seeds import _save_navigation_stats
 
                 await _save_navigation_stats(
@@ -222,7 +262,7 @@ async def _run_board_refresh_impl(
                         await rate_limit.acquire(domain_host, domain_rps)
                         result = await smart_fetcher.fetch(list_url, user_agent=ua)
                 except TimeoutError:
-                    reason = "time_limit"
+                    reason = timeout_reason
                     break
                 except Exception as exc:
                     reason = "fetch_error"
@@ -249,12 +289,7 @@ async def _run_board_refresh_impl(
                     )
                     break
                 if not items:
-                    links = HTMLParser(html).css("tr a, article a, li a")
-                    reason = "unparsed_list" if any(
-                        is_detail_url(node.attributes.get("href", ""))
-                        or node.attributes.get("onclick")
-                        for node in links
-                    ) else "empty_list"
+                    reason = empty_board_reason(html, base_url=list_url)
                     break
                 signature = frozenset(normalize_url(it.url)[1] for it in items)
                 if signature in seen_item_sets:
@@ -309,7 +344,7 @@ async def _run_board_refresh_impl(
                         reason = "article_limit"
                         break
                     if monotonic() >= deadline:
-                        reason = "time_limit"
+                        reason = timeout_reason
                         break
                     if "full_url_limit" in ctx and not await ctx["frontier"].admit_direct(
                         job_id, it.url, limit=ctx["full_url_limit"]
@@ -331,12 +366,12 @@ async def _run_board_refresh_impl(
                                 posted_at=it.posted_at,
                             )
                     except TimeoutError:
-                        reason = "time_limit"
+                        reason = timeout_reason
                         break
                     except Exception as exc:
                         processed_urls.discard(article_hash)
                         log.bind(event="board_page_error", url=it.url, err=str(exc)).warning("skip")
-                if reason in {"article_limit", "url_limit", "time_limit"}:
+                if reason in {"article_limit", "url_limit", "time_limit", "total_time_limit"}:
                     break
                 # Existing articles never stop pagination. Confirm the date boundary
                 # on the next page as well; repeated item sets stop cyclic lists.
@@ -347,6 +382,15 @@ async def _run_board_refresh_impl(
                 )
                 if chronological and old_pages >= 2:
                     reason = "date_boundary"
+                    break
+                next_list_url = next_board_page_url(
+                    html,
+                    getattr(result, "url", None) or list_url,
+                    page_no,
+                    param=board_page_param,
+                )
+                if next_list_url is None:
+                    reason = "no_next_page"
                     break
                 page_no += 1
 
@@ -363,13 +407,27 @@ async def _run_board_refresh_impl(
                 ctx,
                 job_id,
                 src.id,
-                "time_limit" if isinstance(exc, TimeoutError) else "fetch_error",
+                timeout_reason if isinstance(exc, TimeoutError) else "fetch_error",
                 page_no,
                 list_url,
             )
-            log.bind(event="board_source_error", source_id=src.id, err=str(exc)).warning(
-                "source failed, continuing"
-            )
+            reason = timeout_reason if isinstance(exc, TimeoutError) else "fetch_error"
+            log.bind(
+                event="board_source_error",
+                source_id=src.id,
+                err=str(exc),
+                error_type=type(exc).__name__,
+                reason=reason,
+                page=page_no,
+                elapsed_seconds=round(monotonic() - started, 3),
+            ).warning("source failed, continuing")
+        finally:
+            budget["used"] += max(0.0, monotonic() - started)
+            if reason == "total_time_limit":
+                done.discard(src.id)  # This source still needs a later board update.
+
+    if budget["used"] >= settings.board_total_max_seconds:
+        await _record_deferred_boards(ctx, job_id, srcs, done, budget)
 
     if manage_job:
         await drain_processing(ctx)

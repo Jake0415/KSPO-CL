@@ -28,6 +28,9 @@ export type JobStats = {
   current_board_url?: string;
   current_board_page?: number;
   collection_partial?: boolean;
+  board_budget_exhausted?: boolean;
+  board_active_seconds?: number;
+  board_deferred?: Record<string, { url: string; reason: string }>;
   board_outcomes?: Record<string, { reason: string; page: number; url: string; partial: boolean }>;
   repeated_lists?: number;
   termination_reason?: string;

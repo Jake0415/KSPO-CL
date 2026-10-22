@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urljoin, urlparse
 from selectolax.parser import HTMLParser
 
 from kspo_ingest.attach.discovery import ATTACHMENT_EXTS, IGNORED_EXTS, is_attachment_url
+from kspo_ingest.crawl.spa import is_spa_url
 from kspo_ingest.crawl.url_class import is_non_content_url
 from kspo_ingest.crawl.url_normalize import canonical_url
 
@@ -38,7 +39,7 @@ def discover_internal_links(
     """페이지 HTML에서 같은 host 일반 페이지 URL을 절대 URL로 반환.
 
     필터:
-    - href가 비어있거나 javascript:/mailto:/# 시작 → 제외
+    - 빈 href, javascript:/mailto: 및 일반 #앵커 제외 (SPA #/ 경로 보존)
     - urljoin 후 host 미일치 → 제외 (외부 링크 차단)
     - .pdf/.docx/.zip 등 첨부 확장자 → 제외 (extract_links가 처리)
     - .jpg/.png/.mp4 등 이미지·미디어 → 제외
@@ -72,7 +73,7 @@ def discover_internal_links(
             for key, value in parse_qsl(parsed.query, keep_blank_values=True)
         ):
             return
-        if _is_skip_path(parsed.path):
+        if _is_skip_path(url):
             return
         key = _dedup_key(parsed)
         if key in seen:
@@ -83,7 +84,9 @@ def discover_internal_links(
     # 1. <a href> 링크
     for node in tree.css("a[href]"):
         href = (node.attributes.get("href") or "").strip()
-        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+        if not href or href.startswith(("javascript:", "mailto:", "tel:")):
+            continue
+        if href.startswith("#") and not is_spa_url(href):
             continue
         _add(urljoin(base_url, unescape(href)))
 

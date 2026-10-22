@@ -123,7 +123,9 @@ class SmartFetcher:
         host = urlparse(url).netloc.lower()
 
         # 강제 브라우저 모드
-        if force_browser:
+        from kspo_ingest.crawl.spa import is_spa_url
+
+        if force_browser or is_spa_url(url):
             browser = await self._ensure_browser()
             return await browser.fetch(url, user_agent=user_agent)
 

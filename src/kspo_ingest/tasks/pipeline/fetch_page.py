@@ -88,7 +88,7 @@ async def fetch_page(ctx: dict, *, job_id: int, domain_id: int, url: str, depth:
             # SmartFetcher — 자동 전략 선택
             try:
                 result = await smart.fetch(
-                    url, user_agent=ua, force_browser=browser_required(domain)
+                    url, user_agent=ua, force_browser=browser_required(domain, url)
                 )
             except ConnectionError as e:
                 # UNREACHABLE domain
@@ -109,7 +109,9 @@ async def fetch_page(ctx: dict, *, job_id: int, domain_id: int, url: str, depth:
         else:
             # 하위 호환: use_playwright 또는 SmartFetcher 미등록
             fetcher = ctx["fetcher"]
-            active_fetcher = ctx.get("playwright_fetcher") if browser_required(domain) else fetcher
+            active_fetcher = (
+                ctx.get("playwright_fetcher") if browser_required(domain, url) else fetcher
+            )
             try:
                 result = await active_fetcher.fetch(url, user_agent=ua)
             except ResponseTooLargeError as e:

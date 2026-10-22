@@ -10,6 +10,7 @@ from selectolax.parser import HTMLParser
 
 from kspo_ingest.crawl.board_identity import ARTICLE_IDS as SHARED_ARTICLE_IDS
 from kspo_ingest.crawl.board_identity import BOARD_IDS, CURSORS, query_pairs
+from kspo_ingest.crawl.spa import effective_parts, is_spa_url, restore_route
 from kspo_ingest.crawl.url_normalize import TRACKING_PARAMS, normalize_url
 
 ARTICLE_IDS = SHARED_ARTICLE_IDS | {"seq", "idx"}
@@ -38,7 +39,7 @@ def is_landing_url(url: str) -> bool:
     Query-routed boards may legitimately live at / or index.php, so preserve
     explicit board identity or a board/list route in the query string.
     """
-    p = urlsplit(url)
+    p = effective_parts(url)
     query = {k.lower(): v.lower() for k, v in parse_qsl(p.query)}
     if any(query.get(k) for k in ("bbsid", "boardid", "boardseq", "board_seq")):
         return False
@@ -52,7 +53,7 @@ def is_landing_url(url: str) -> bool:
 
 
 def entry_url(url: str, host: str) -> str | None:
-    p = urlsplit(url)
+    p = effective_parts(url)
     if p.scheme not in {"http", "https"} or p.hostname != host or p.username or p.password:
         return None
     if is_landing_url(url):
@@ -82,15 +83,19 @@ def entry_url(url: str, host: str) -> str | None:
         return None
     path = re.sub(r"/page/\d+/?$", "", path, flags=re.I)
     pairs = query_pairs(p.query)
-    navigation = {"topmenuseq", "menuno"} if any(
-        k.lower() in BOARD_IDS and v for k, v in pairs
-    ) else set()
+    navigation = (
+        {"topmenuseq", "menuno"} if any(k.lower() in BOARD_IDS and v for k, v in pairs) else set()
+    )
+    if is_spa_url(url):
+        navigation |= {"max"}  # Page size is not a separate board.
     qs = sorted(
         (k, v)
         for k, v in pairs
         if k.lower() not in NOISE | ARTICLE_IDS | navigation and k not in TRACKING_PARAMS
     )
-    return urlunsplit((p.scheme.lower(), p.netloc.lower(), path, urlencode(qs), ""))
+    return restore_route(
+        url, urlunsplit((p.scheme.lower(), p.netloc.lower(), path, urlencode(qs), ""))
+    )
 
 
 def validate_board(html: str, url: str, host: str) -> BoardValidation:
@@ -101,8 +106,8 @@ def validate_board(html: str, url: str, host: str) -> BoardValidation:
     entry = entry_url(url, host)
     if entry is None:
         return BoardValidation(False, None, "not_list_url_or_wrong_host")
-    if DETAIL.search(urlsplit(url).path) or any(
-        k.lower() in ARTICLE_IDS for k, _ in parse_qsl(urlsplit(url).query)
+    if DETAIL.search(effective_parts(url).path) or any(
+        k.lower() in ARTICLE_IDS for k, _ in parse_qsl(effective_parts(url).query)
     ):
         return BoardValidation(False, entry, "detail_requires_list_verification")
     if host == "soma.kspo.or.kr" and not urlsplit(url).path.startswith(

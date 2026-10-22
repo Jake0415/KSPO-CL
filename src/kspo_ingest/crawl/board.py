@@ -8,9 +8,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 from selectolax.parser import HTMLParser
+
+from kspo_ingest.crawl.spa import effective_parts, is_spa_url, restore_route
 
 _DATE_PATTERNS = [
     re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일"),
@@ -162,7 +164,7 @@ def extract_board_items(html: str, *, base_url: str) -> list[BoardItem]:
         if link_node is None:
             continue
         href = (link_node.attributes.get("href") or "").strip()
-        if href and not href.startswith(("#", "javascript:")):
+        if href and (is_spa_url(href) or not href.startswith(("#", "javascript:"))):
             absolute = urljoin(base_url, href)
         else:
             # JS 링크: ID가 onclick 속성 또는 href="javascript:fnXxx('id')" 어느 쪽에도 올 수 있다.
@@ -285,6 +287,7 @@ _HOST_PAGE_PARAM: dict[str, str] = {
     "www.kboat.or.kr": "pagination.currentPage",
     "www.kcycle.or.kr": "pagination.currentPage",
     "www.ksponco.or.kr": "nPage",
+    "ksponco.or.kr": "nPage",
     "www.sports.re.kr": "pageNo",
     "www.spoinfo.or.kr": "pageNo",
 }
@@ -301,6 +304,23 @@ def build_page_url(list_url: str, page_no: int, *, param: str | None = None) -> 
     param override(도메인 설정) > URL에서 기존 파라미터 감지 > 기본 'pageIndex'.
     param에 점(pagination.currentPage) 등이 있어도 안전하도록 re.escape 사용.
     """
+    if is_spa_url(list_url):
+        parts = effective_parts(list_url)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        values = dict(pairs)
+        # SPA cursors belong inside the fragment, never on the document URL.
+        if "offset" in values or "max" in values:
+            size = values.get("max", "20")
+            if not size.isdigit() or int(size) <= 0:
+                return list_url
+            cursor, value = "offset", str((page_no - 1) * int(size))
+        else:
+            cursor = next((k for k, _ in pairs if k in _KNOWN_PAGE_PARAMS), None)
+            if cursor is None:
+                return list_url  # No evidence: do not invent a pagination route.
+            value = str(page_no)
+        pairs = [(k, v) for k, v in pairs if k != cursor] + [(cursor, value)]
+        return restore_route(list_url, urlunsplit(parts._replace(query=urlencode(pairs))))
     if param is None:
         for p in _KNOWN_PAGE_PARAMS:
             if re.search(rf"[?&]{re.escape(p)}=\d+", list_url):
@@ -338,3 +358,127 @@ def canonical_board_list_url(url: str) -> str | None:
         return None
     base = re.sub(r"/(?:view|list)\.do$", "/list.do", path)
     return f"{base}?menuNo={m.group(1)}"
+
+
+def empty_board_reason(html: str, *, base_url: str) -> str:
+    """Distinguish a real unparsed article from navigation on an empty list.
+
+    Only use DOM evidence; images are not downloaded or OCR-processed.
+    """
+    from kspo_ingest.crawl.board_identity import is_detail_url
+
+    tree = HTMLParser(html)
+    tree.strip_tags(["script", "style", "noscript", "template", "header", "footer", "nav", "aside"])
+    scope = tree.css_first('main, [role="main"], #content, #contents, #container') or tree.body
+    if scope is None:
+        return "empty_list"
+    base_path = effective_parts(base_url).path.rstrip("/")
+    for link in scope.css("a[href], a[onclick]"):
+        parent = link
+        navigation = False
+        while parent is not None and parent is not scope:
+            classes = (parent.attributes.get("class") or "").lower().split()
+            if any(re.search(r"pag(?:e|ing|ination)|(?:^|-)menu$", name) for name in classes):
+                navigation = True
+                break
+            parent = parent.parent
+        if navigation:
+            continue
+        href = (link.attributes.get("href") or "").strip()
+        if href and (
+            is_spa_url(href) or not href.lower().startswith(("#", "javascript:", "mailto:", "tel:"))
+        ):
+            url = urljoin(base_url, href)
+            path = effective_parts(url).path
+            if is_detail_url(url) or re.fullmatch(re.escape(base_path) + r"/\d+/?", path):
+                return "unparsed_list"
+        action = (link.attributes.get("onclick") or "") + " " + href
+        # Numeric IDs in unknown list actions still require review, but paging,
+        # search and global controls do not prove that an article exists.
+        calls = re.findall(r"([A-Za-z_]\w*)\(\s*['\"]?(\d+)", action)
+        for name, _ in calls:
+            if name.lower() in {"void", "alert", "confirm"}:
+                continue
+            if not re.search(
+                r"search|paging|pagination|page|sort|filter|menu|toggle|print|share", name, re.I
+            ):
+                return "unparsed_list"
+    return "empty_list"
+
+
+def next_spa_page_url(html: str, current_url: str, page_no: int) -> str | None:
+    """Prefer an actual next cursor link; use observed offset/page query as fallback."""
+    from kspo_ingest.crawl.board_identity import CURSORS, board_key
+
+    current = effective_parts(current_url)
+    values = dict(parse_qsl(current.query))
+    family = board_key(current_url)
+    choices = []
+    for anchor in HTMLParser(html).css("a[href]"):
+        href = anchor.attributes.get("href") or ""
+        if not is_spa_url(href):
+            continue
+        target = urljoin(current_url, href)
+        if board_key(target) != family:
+            continue
+        query = dict(parse_qsl(effective_parts(target).query))
+        for key, value in query.items():
+            before = values.get(key, "0")
+            if (
+                key.lower() in CURSORS
+                and value.isdigit()
+                and before.isdigit()
+                and int(value) > int(before)
+            ):
+                choices.append((int(value), target))
+    if choices:
+        return min(choices)[1]
+    fallback = build_page_url(current_url, page_no + 1)
+    return fallback if fallback != current_url else None
+
+
+def next_board_page_url(
+    html: str, current_url: str, page_no: int, *, param: str | None = None
+) -> str | None:
+    """Use actual paging controls before synthesizing an unseen page number."""
+    if is_spa_url(current_url):
+        return next_spa_page_url(html, current_url, page_no)
+    from kspo_ingest.crawl.board_identity import board_key, is_detail_url
+
+    def paging_family(url):
+        parts = urlsplit(url)
+        query = [(k, v) for k, v in parse_qsl(parts.query) if k.lower() not in {"b_list_cnt"} and v]
+        return board_key(urlunsplit(parts._replace(query=urlencode(query))))
+
+    current = urlsplit(current_url)
+    family = paging_family(current_url)
+    choices = []
+    has_paging = False
+    for node in HTMLParser(html).css("a[href], a[onclick]"):
+        href = (node.attributes.get("href") or "").strip()
+        action = href + " " + (node.attributes.get("onclick") or "")
+        match = re.search(r"(?:goPage|fnPage|fnPaging)\(\s*['\"]?(\d+)", action, re.I)
+        if match:
+            has_paging = True
+            number = int(match[1])
+            if number > page_no:
+                choices.append((number, build_page_url(current_url, number, param=param)))
+            continue
+        if not href or href.startswith(("#", "javascript:")):
+            continue
+        target = urljoin(current_url, href)
+        parsed = urlsplit(target)
+        if (parsed.netloc, parsed.path) != (current.netloc, current.path):
+            continue
+        if is_detail_url(target) or family is None or paging_family(target) != family:
+            continue
+        for key, value in parse_qsl(parsed.query):
+            if key in _KNOWN_PAGE_PARAMS and value.isdigit():
+                has_paging = True
+                if int(value) > page_no:
+                    choices.append((int(value), target))
+    if choices:
+        return min(choices)[1]
+    if has_paging:
+        return None
+    return build_page_url(current_url, page_no + 1, param=param)

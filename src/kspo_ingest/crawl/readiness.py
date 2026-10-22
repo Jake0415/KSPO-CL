@@ -31,7 +31,9 @@ class ContentReadinessError(RuntimeError):
 
 
 _SNAPSHOT = """(selectors) => {
- const node=document.querySelector(selectors.content);
+ const node=(selectors.content === "body"
+   ? document.querySelector("[ng-view], [data-ng-view], [ui-view], [data-ui-view]") : null)
+   || document.querySelector(selectors.content);
  const visible=el => { const r=el.getBoundingClientRect(); const s=getComputedStyle(el);
    return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden'; };
  const text=(node?.innerText||'').replace(/\\s+/g,' ').trim();
@@ -107,11 +109,7 @@ class ContentWaiter:
                 # Execution contexts disappear while redirects replace documents.
                 await asyncio.sleep(policy.poll_ms / 1000)
                 continue
-            if (
-                before
-                and (state["url"] != before["url"] or state["document_id"] != before["document_id"])
-                and mode == "dynamic"
-            ):
+            if before and (state["document_id"] != before["document_id"]) and mode == "dynamic":
                 mode = "navigation"
                 deadline = time.monotonic() + policy.initial_timeout_ms / 1000
             if mode == "navigation" and not load_checked:
@@ -133,6 +131,12 @@ class ContentWaiter:
                 and state["text_length"] >= 10
                 and not state["loading"]
                 and not self.pending
+                and not (
+                    before
+                    and state["url"] != before["url"]
+                    and state["document_id"] == before["document_id"]
+                    and state["fingerprint"] == before["fingerprint"]
+                )
             )
             if not usable or signature != last:
                 stable_since = time.monotonic()

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlunsplit
+
+from kspo_ingest.crawl.spa import effective_parts, is_spa_url, restore_route
 
 CURSORS = {
     "page",
@@ -30,10 +32,14 @@ def query_pairs(query: str) -> list[tuple[str, str]]:
 
 
 def is_detail_url(url: str) -> bool:
-    p = urlsplit(url)
+    p = effective_parts(url)
     qs = query_pairs(p.query)
+    spa_article = is_spa_url(url) and bool(
+        re.search(r"/(?:notice|news|article|post)/[0-9]+/?$", p.path, re.I)
+    )
     return (
-        any(k.lower() in ARTICLE_IDS and v for k, v in qs)
+        spa_article
+        or any(k.lower() in ARTICLE_IDS and v for k, v in qs)
         or any(
             k.lower() in {"act", "mode", "action"} and v.lower() in {"view", "detail", "read"}
             for k, v in qs
@@ -45,13 +51,18 @@ def is_detail_url(url: str) -> bool:
 
 
 def board_key(url: str) -> str | None:
-    p = urlsplit(url)
+    p = effective_parts(url)
     path = re.sub(r"/page/\d+/?$", "", p.path, flags=re.I)
     qs = query_pairs(p.query)
     routed = path.lower().endswith(("/board.es", "/gallery.es"))
     detail = is_detail_url(url)
-    if not (routed or re.search(r"list(?:\.(?:do|kspo)|/|$)", path, re.I) or detail):
+    spa_list = is_spa_url(url) and bool(
+        re.search(r"/(?:notice|board|bbs|news|list)/?$", path, re.I)
+    )
+    if not (spa_list or routed or re.search(r"list(?:\.(?:do|kspo)|/|$)", path, re.I) or detail):
         return None
+    if is_spa_url(url) and detail:
+        path = re.sub(r"(/(?:notice|news|article|post))/[0-9]+/?$", r"\1", path, flags=re.I)
     if detail and not routed:
         path = re.sub(
             r"(?:view|detail|read)(?=\.(?:do|kspo)$)",
@@ -61,10 +72,12 @@ def board_key(url: str) -> str | None:
         )
     has_board_id = any(k.lower() in BOARD_IDS and v for k, v in qs)
     ignore = CURSORS | ARTICLE_IDS | {"act", "mode", "action"}
+    if is_spa_url(url):
+        ignore |= {"max"}
     if has_board_id:
         ignore |= {"topmenuseq", "menuno"}
     identity = sorted((k, v) for k, v in qs if k.lower() not in ignore)
-    return urlunsplit(("", p.netloc.lower(), path, urlencode(identity), ""))
+    return restore_route(url, urlunsplit(("", p.netloc.lower(), path, urlencode(identity), "")))
 
 
 def is_board_owned_link(url: str, *, confirmed_list_urls: set[str]) -> bool:

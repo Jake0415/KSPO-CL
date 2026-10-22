@@ -35,7 +35,12 @@ async def test_existing_page_does_not_stop_next_page_and_date_boundary(monkeypat
         async def get(self, model, ident):
             return domain if model is Domain else source if model is BoardSource else None
 
+        async def scalars(self, statement):
+            return []
+
         async def execute(self, statement):
+            if "crawl_jobs" in str(statement):
+                return SimpleNamespace(scalar_one_or_none=lambda: None)
             if "board_source" in str(statement):
                 return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [source]))
             return SimpleNamespace(all=lambda: [(old_hash,)])
@@ -95,6 +100,9 @@ async def test_automatic_registration_and_rejection_preserved():
 
         async def get(self, model, ident):
             return SimpleNamespace(host="x.kr", user_agent=None)
+
+        async def scalars(self, statement):
+            return []
 
         async def execute(self, statement):
             return SimpleNamespace(scalar_one_or_none=lambda: self.existing)
@@ -158,6 +166,9 @@ async def test_full_resets_site_board_sources_and_data_before_rediscovery(monkey
         async def get(self, model, ident):
             return domain if model is Domain else job
 
+        async def scalars(self, statement):
+            return []
+
         async def execute(self, statement):
             if str(statement).startswith("DELETE"):
                 # Both deletes must carry a domain predicate, never affect other sites.
@@ -166,7 +177,11 @@ async def test_full_resets_site_board_sources_and_data_before_rediscovery(monkey
                 events.append(
                     "reset_boards" if statement.table.name == "board_source" else "reset_pages"
                 )
-            return SimpleNamespace(all=lambda: [], scalar_one_or_none=lambda: job)
+            return SimpleNamespace(
+                all=lambda: [],
+                scalar_one_or_none=lambda: job,
+                scalars=lambda: SimpleNamespace(all=lambda: []),
+            )
 
         async def commit(self):
             pass
