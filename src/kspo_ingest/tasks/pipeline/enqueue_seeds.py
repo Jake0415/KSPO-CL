@@ -49,7 +49,6 @@ from kspo_ingest.tasks.pipeline.refine_page import refine_page
 log = get_logger("worker", "enqueue_seeds")
 
 
-
 async def enqueue_seeds(ctx: dict, *, job_id: int, domain_id: int) -> None:
     # Any failure in the BFS body must still leave a terminal job status.
     async with (
@@ -135,6 +134,7 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
         await frontier.enqueue(job_id, seed_url, depth=0)
     ctx = {
         **ctx,
+        "new_discoveries": [],
         "full_board_sources_done": set(),
         "full_board_urls": set(),
         "full_url_limit": max_pages,
@@ -159,6 +159,9 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
 
     processed = 0
     while processed < max_pages:
+        # Flush before checking for exhaustion, including discoveries retained
+        # after a transient queue failure on the preceding page.
+        await _enqueue_discovered(ctx, job_id=job_id, domain_id=domain_id)
         await _save_navigation_stats(ctx, job_id)
         item = await frontier.dequeue(job_id)
         if item is None:
@@ -174,9 +177,17 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
 
         family = list_family(url)
         async with session_factory() as s:
-            owned = set((await s.execute(select(BoardSource.list_url).where(
-                BoardSource.domain_id == domain_id, BoardSource.status == "confirmed"
-            ))).scalars().all())
+            owned = set(
+                (
+                    await s.execute(
+                        select(BoardSource.list_url).where(
+                            BoardSource.domain_id == domain_id, BoardSource.status == "confirmed"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
         if is_board_owned_link(url, confirmed_list_urls=owned):
             await frontier.ack(job_id, url)
             continue
@@ -208,7 +219,7 @@ async def _enqueue_seeds_impl(ctx: dict, *, job_id: int, domain_id: int) -> None
 
             await extract_links(ctx, job_id=job_id, page_id=page_id)
             await _run_board_refresh_impl(ctx, job_id=job_id, domain_id=domain_id, manage_job=False)
-            await _enqueue_discovered(session_factory, frontier, job_id=job_id, domain_id=domain_id)
+            await _enqueue_discovered(ctx, job_id=job_id, domain_id=domain_id)
 
             cleaned = await clean_page(ctx, job_id=job_id, page_id=page_id)
             if cleaned is None:
@@ -368,43 +379,40 @@ async def _finish_page(
             ).info(f"skip embed ({score.quadrant})")
 
 
-async def _enqueue_discovered(
-    session_factory,
-    frontier: Frontier,
-    *,
-    job_id: int,
-    domain_id: int,
-) -> int:
-    """Pick up newly DISCOVERED pages and enqueue them into frontier."""
-    async with session_factory() as s:
-        confirmed_list_urls = set(
+async def _enqueue_discovered(ctx: dict, *, job_id: int, domain_id: int) -> int:
+    """Drain committed discoveries from this job, without rescanning pages.
+
+    Remove a buffered item only after Redis accepted it (or explicitly rejected
+    it as duplicate/over budget). On an exception retain the unprocessed suffix;
+    the next loop must drain it before declaring the frontier exhausted.
+    """
+    pending = ctx["new_discoveries"]
+    if not pending:
+        return 0
+    from kspo_ingest.crawl.url_class import is_search_result_url
+
+    async with ctx["session_factory"]() as s:
+        confirmed = set(
             (
                 await s.execute(
                     select(BoardSource.list_url).where(
-                        BoardSource.domain_id == domain_id,
-                        BoardSource.status == "confirmed",
+                        BoardSource.domain_id == domain_id, BoardSource.status == "confirmed"
                     )
                 )
             )
             .scalars()
             .all()
         )
-
-    enqueued = 0
-    async with session_factory() as s:
-        rows = await s.execute(
-            select(Page.url, Page.depth).where(
-                Page.domain_id == domain_id,
-                Page.status == "DISCOVERED",
-                Page.board_source_id.is_(None),
-            )
-        )
-        for url, page_depth in rows.all():
-            if is_board_owned_link(url, confirmed_list_urls=confirmed_list_urls):
-                continue
-            added = await frontier.enqueue(job_id, url, page_depth or 0)
-            if added:
-                enqueued += 1
+    completed = enqueued = 0
+    try:
+        for url, depth in pending:
+            if not is_search_result_url(url) and not is_board_owned_link(
+                url, confirmed_list_urls=confirmed
+            ):
+                enqueued += bool(await ctx["frontier"].enqueue(job_id, url, depth))
+            completed += 1
+    finally:
+        del pending[:completed]
     return enqueued
 
 

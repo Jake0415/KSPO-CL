@@ -31,6 +31,7 @@ from kspo_ingest.crawl.dynamic import navigation_depth
 from kspo_ingest.crawl.external_links import discover_external_links
 from kspo_ingest.crawl.internal_links import discover_internal_links
 from kspo_ingest.crawl.soma import discover_urls
+from kspo_ingest.crawl.url_class import is_search_result_url
 from kspo_ingest.crawl.url_normalize import normalize_url
 from kspo_ingest.db.models import Attachment, BoardSource, Domain, Page
 from kspo_ingest.observability.logger import get_logger
@@ -83,6 +84,7 @@ async def extract_links(ctx: dict, *, job_id: int, page_id: int) -> dict[str, in
             html=html,
             redis=ctx.get("frontier").redis if ctx.get("frontier") else None,
             job_id=job_id,
+            new_pages=ctx.get("new_discoveries"),
         )
 
         log.bind(
@@ -186,11 +188,18 @@ def crawlable_link_urls(html: str, *, base_url: str, host: str) -> list[str]:
         for link in discover_external_links(html, base_url=base_url, source_host=host)
         if link.url not in seen
     )
-    return urls
+    return [url for url in urls if not is_search_result_url(url)]
 
 
 async def _upsert_discovered_pages(
-    s, *, page: Page, domain: Domain, html: str, redis=None, job_id: int | None = None
+    s,
+    *,
+    page: Page,
+    domain: Domain,
+    html: str,
+    redis=None,
+    job_id: int | None = None,
+    new_pages: list[tuple[str, int]] | None = None,
 ) -> int:
     """내부 링크 → 미발견 페이지를 status=DISCOVERED로 upsert.
 
@@ -202,9 +211,17 @@ async def _upsert_discovered_pages(
     )
     from kspo_ingest.crawl.board_identity import is_board_owned_link
 
-    confirmed = set((await s.execute(select(BoardSource.list_url).where(
-        BoardSource.domain_id == domain.id, BoardSource.status == "confirmed"
-    ))).scalars().all())
+    confirmed = set(
+        (
+            await s.execute(
+                select(BoardSource.list_url).where(
+                    BoardSource.domain_id == domain.id, BoardSource.status == "confirmed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     urls = [u for u in urls if not is_board_owned_link(u, confirmed_list_urls=confirmed)]
     if not urls:
         return 0
@@ -266,7 +283,14 @@ async def _upsert_discovered_pages(
 
     stmt = pg_insert(Page).values(rows)
     stmt = stmt.on_conflict_do_nothing(constraint="uq_pages_domain_id_url_hash")
+    if new_pages is not None:
+        stmt = stmt.returning(Page.url, Page.depth)
     result = await s.execute(stmt)
+    inserted = list(result.all()) if new_pages is not None else None
     await s.commit()
-    # rowcount: ON CONFLICT DO NOTHING 시 실제 INSERT된 행만 카운트
+    # Deliver only committed INSERTs, never existing rows or an entire DB backlog.
+    # The shared full-job buffer also receives discoveries from board articles.
+    if inserted is not None:
+        new_pages.extend((url, depth or 0) for url, depth in inserted)
+        return len(inserted)
     return result.rowcount or 0

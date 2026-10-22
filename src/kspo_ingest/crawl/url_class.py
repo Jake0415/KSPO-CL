@@ -100,6 +100,31 @@ def _norm(segment: str) -> str:
     return _NORM_RE.sub("", segment.lower())
 
 
+def is_search_result_url(url: str) -> bool:
+    """Exclude query-generated results, preserving entry forms and real details.
+
+    Search routers may use author/all/subject/facet instead of keyword. Any
+    populated query on a search-result path is a generated state, including
+    sorting and pagination. Ordinary board pagination is not a search state.
+    """
+    route = effective_parts(url)
+    segments = [_norm(part.split(".", 1)[0]) for part in route.path.split("/") if part]
+    search = any(
+        part.startswith("search") or (part.endswith("search") and part != "research")
+        for part in segments
+    )
+    # /search/detail/<catalog-id> is a document, not a result combination.
+    if search and any(part in {"detail", "view"} for part in segments):
+        return False
+    pairs = [(key.lower(), value.strip()) for key, value in parse_qsl(route.query)]
+    if search:
+        return any(value for _, value in pairs)
+    return any(
+        key in {"keyword", "query", "q", "searchword", "searchwrd", "searchkeyword"} and value
+        for key, value in pairs
+    )
+
+
 def is_non_content_url(url_or_path: str) -> bool:
     """True if the URL/path is an auth/account/utility page with no KB value.
 
@@ -109,6 +134,8 @@ def is_non_content_url(url_or_path: str) -> bool:
     """
     if not url_or_path:
         return False
+    if is_search_result_url(url_or_path):
+        return True
     path = (
         effective_parts(url_or_path).path
         if "://" in url_or_path or is_spa_url(url_or_path)
@@ -118,11 +145,6 @@ def is_non_content_url(url_or_path: str) -> bool:
         route = effective_parts(url_or_path)
         segments = {_norm(part) for part in route.path.split("/")}
         if segments & {"delete", "update", "save", "apply"}:
-            return True
-        if any("search" in part for part in segments) and any(
-            k.lower() in {"keyword", "query", "q", "searchword", "searchwrd"} and v.strip()
-            for k, v in parse_qsl(route.query)
-        ):
             return True
     norm_path = _norm(path)
     if any(tok in norm_path for tok in _STRONG_TOKENS):

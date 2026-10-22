@@ -84,6 +84,7 @@ async def test_size_decreases_on_dequeue(redis):
 @pytest.mark.asyncio
 async def test_hard_url_limit_and_duplicate_counter(redis):
     f = Frontier(redis)
+    await redis.set("crawl_limit:1", 2000)
     for n in range(2000):
         assert await f.enqueue(1, f"https://x.com/{n}", 0)
     assert not await f.enqueue(1, "https://x.com/overflow", 0)
